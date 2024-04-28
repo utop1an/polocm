@@ -1,1 +1,1 @@
-Start (home),walk (cafe),Buy (tea),wait (minutes.),Add (water),Pour (milk),Dip (teabag, mug),Mix (teabag, water, milk)
+Make (sandwich, cheese, corn),Put (sandwich),Move (tray),Serve (sandwich),Move (tray),Make (sandwich, cheese),Put (sandwich),Move (tray),Serve (sandwich),Move (tray),Make (sandwich, cheese, corn),Put (sandwich),Move (tray),Serve (sandwich),Move (tray),Make (sandwich, cheese, corn),Put (sandwich),Make (sandwich, cheese),Put (sandwich),Move (tray),Serve (sandwich),Move (tray),Move (tray7),Serve (sandwich),Move (tray7)
