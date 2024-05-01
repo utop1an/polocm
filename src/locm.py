@@ -5,6 +5,7 @@ from utils import *
 
 
 class Transition:
+    domain_name= "DOMAIN"
     raw_seqs = []
     raw_transistions = set()
     raw_arguments = set()
@@ -15,12 +16,33 @@ class Transition:
     raw_types = []
     argtype = defaultdict(set)
 
-    def __init__(self, seqs) -> None:
+    def __init__(self, seqs, domain_name="DOMAIN_XXX") -> None:
         # Todo: resolve missing/noise 
+        self.domain_name = domain_name
         self.raw_seqs = seqs
         self.parse_seqs(seqs)
         self.get_types()
+        self.get_type_names()
 
+    def locm(self):
+        printmd("## "+ self.domain_name.upper())
+        adjacency_matrix_list, graphs, cytoscapeobjs = self.build_and_save_transition_graphs()
+        adjacency_matrix_list_with_holes = self.get_adjacency_matrix_with_holes(adjacency_matrix_list)
+        self.dump_adjacency_matrix(adjacency_matrix_list, adjacency_matrix_list_with_holes)
+        holes_per_class = self.get_holes_per_class(adjacency_matrix_list_with_holes)
+        transitions_per_class = self.get_transitions_per_class(adjacency_matrix_list_with_holes)
+        consecutive_transitions_per_class =  self.get_consecutive_transitions_per_class(adjacency_matrix_list_with_holes)
+        printmd("### Getting transitions sets for each class using LOCM2")
+        transition_sets_per_class = self.locm2_get_transition_sets_per_class(holes_per_class, transitions_per_class, consecutive_transitions_per_class, adjacency_matrix_list)
+        state_machines_overall_list = self.mark_start_end_state(transition_sets_per_class, adjacency_matrix_list)
+        state_mappings_class, state_machines_overall_list_2 = self.rename_states(state_machines_overall_list)
+        HS_list = self.form_hs(transition_sets_per_class, adjacency_matrix_list)
+        HS_list_retained = self.test_hs(HS_list)
+        
+        param_bindings_list_overall = self.create_and_merge_state_params(HS_list_retained, state_machines_overall_list)
+        para_bind_overall_fault_removed = self.remove_param_flaws(param_bindings_list_overall, state_machines_overall_list)
+        self.form_pddl(para_bind_overall_fault_removed, state_machines_overall_list)
+        self.validate_and_fix_pddl(para_bind_overall_fault_removed, state_mappings_class, state_machines_overall_list, state_machines_overall_list_2)
 
     def parse_seqs(self,seqs):
         for seq in seqs:
@@ -69,30 +91,30 @@ class Transition:
                 # print("no intersections left")
                 break
 
-        self.raw_types = types_cp
+        self.types = types_cp
 
     # TODO: Can use better approach here. NER might help.
-    def get_type_names(types):
+    def get_type_names(self):
         # Name the class to first object found ignoring the digits in it
         type_names = []
-        for t in types:
+        for t in self.types:
             for object in t:
     #             object = ''.join([i for i in object if not i.isdigit()])
                 type_names.append(object)
                 break
-        return type_names
+        self.type_names = type_names
 
-    def get_type_index(arg,types):
-        for type_index, t in enumerate(types):
+    def get_type_index(self, arg):
+        for type_index, t in enumerate(self.types):
             if arg in t:
                 return type_index #it is like breaking out of the loop
-        print("Error:class index not found") #this statement is only executed if class index is not returned.
+        print("Error:class index not found for", arg) #this statement is only executed if class index is not returned.
 
-    def build_and_save_transition_graphs(self,classes, domain_name, class_names):
+    def build_and_save_transition_graphs(self):
         # There should be a graph for each class of objects.
         graphs = []
         # Initialize all graphs empty
-        for sort in classes:
+        for sort in self.types:
             graphs.append(nx.DiGraph())
 
         consecutive_transition_lists = [] #list of consecutive transitions per object instance per sequence.
@@ -104,11 +126,11 @@ class Transition:
                     for j, arg_prime in enumerate(actarg_tuple[1]):  # for all arguments in actarg tuples
                         if arg == arg_prime:  # if argument matches arg
                             node = actarg_tuple[0] + "." +  str(j)
-                            # node = actarg_tuple[0] +  "." + class_names[get_class_index(arg,classes)] + "." +  str(j)  # name the node of graph which represents a transition
+                            # node = actarg_tuple[0] +  "." + class_names[get_type_index(arg,classes)] + "." +  str(j)  # name the node of graph which represents a transition
                             consecutive_transition_list.append(node)  # add node to the cons_transition for sequence and argument
 
                             # for each class append the nodes to the graph of that class
-                            class_index = self.get_class_index(arg_prime, classes)  # get index of class to which the object belongs to
+                            class_index = self.get_type_index(arg_prime)  # get index of class to which the object belongs to
                             graphs[class_index].add_node(node)  # add node to the graph of that class
 
                 consecutive_transition_lists.append([n, arg, consecutive_transition_list])
@@ -119,7 +141,7 @@ class Transition:
             # print(cons_trans_list)
             seq_no = cons_trans_list[0]  # get sequence number
             arg = cons_trans_list[1]  # get argument
-            class_index = self.get_type_index(arg, classes)  # get index of class
+            class_index = self.get_type_index(arg)  # get index of class
             # add directed edges to graph of that class
             for i in range(0, len(cons_trans_list[2]) - 1):
                     if graphs[class_index].has_edge(cons_trans_list[2][i], cons_trans_list[2][i + 1]):
@@ -130,7 +152,7 @@ class Transition:
 
         
         # make directory if doesn't exist
-        dirName = "output/"+ domain_name
+        dirName = "output/"+ self.domain_name
         if not os.path.exists(dirName):
             os.makedirs(dirName)
             print("Directory ", dirName, " Created ")
@@ -139,14 +161,15 @@ class Transition:
         empty_directory(dirName)
         
         # save all the graphs
-        adjacency_matrix_list = save(graphs, domain_name) # list of adjacency matrices per class
+
+        adjacency_matrix_list = save(graphs, self.type_names, self.domain_name) # list of adjacency matrices per class
         
         # plot cytoscape interactive graphs
-        cytoscapeobs = plot_cytographs(graphs,domain_name, adjacency_matrix_list)
+        cytoscapeobs = plot_cytographs(graphs,self.domain_name,self.type_names, adjacency_matrix_list)
         
         return adjacency_matrix_list, graphs, cytoscapeobs
     
-    def get_adjacency_matrix_with_holes(adjacency_matrix_list):
+    def get_adjacency_matrix_with_holes(self,adjacency_matrix_list):
         adjacency_matrix_list_with_holes = []
         for index,adjacency_matrix in enumerate(adjacency_matrix_list):
             # print("\n ROWS ===========")
@@ -178,16 +201,39 @@ class Transition:
             adjacency_matrix_list_with_holes.append(df1)
         return adjacency_matrix_list_with_holes
     
-    def dump_adjacency_matrix(adjacency_matrix_list, adjacency_matrix_list_with_holes, class_names):
+    def dump_adjacency_matrix(self,adjacency_matrix_list, adjacency_matrix_list_with_holes):
         # Printing FSM matrices with and without holes
         for index,adjacency_matrix in enumerate(adjacency_matrix_list):
-            printmd("\n#### " + class_names[index] )
+            printmd("\n#### " + self.type_names[index] )
             print_table(adjacency_matrix)
 
-            printmd("\n#### HOLES: " + class_names[index])
+            printmd("\n#### HOLES: " + self.type_names[index])
             print_table(adjacency_matrix_list_with_holes[index])
 
-    def get_consecutive_transitions_per_class(adjacency_matrix_list_with_holes):
+    def get_holes_per_class(self, adjacency_matrix_list_with_holes):
+        # Create list of set of holes per class (H)
+        holes_per_class = []
+
+        for index,df in enumerate(adjacency_matrix_list_with_holes):
+            holes = set()
+            for i in range(df.shape[0]):
+                for j in range(df.shape[1]):
+                    if df.iloc[i,j] == 'hole':
+                        holes.add(frozenset({df.index[i] , df.columns[j]}))
+            holes_per_class.append(holes)
+        for i, hole in enumerate(holes_per_class):
+            print("#holes in class " + self.type_names[i]+":" + str(len(hole)))
+        #     for h in hole:
+        #         print(list(h))
+        return holes_per_class
+    
+    def get_transitions_per_class(self,adjacency_matrix_list_with_holes):
+        transitions_per_class = []
+        for index, df in enumerate(adjacency_matrix_list_with_holes):
+            transitions_per_class.append(df.columns.values)
+        return transitions_per_class
+
+    def get_consecutive_transitions_per_class(self,adjacency_matrix_list_with_holes):
         consecutive_transitions_per_class = []
         for index, df in enumerate(adjacency_matrix_list_with_holes):
             consecutive_transitions = set()  # for a class
@@ -200,7 +246,7 @@ class Transition:
             consecutive_transitions_per_class.append(consecutive_transitions)
         return consecutive_transitions_per_class
 
-    def check_well_formed(subset_df):
+    def check_well_formed(self,subset_df):
     # got the adjacency matrix subset
         df = subset_df.copy()
         well_formed_flag = True
@@ -236,7 +282,7 @@ class Transition:
         elif well_formed_flag:
             return True
     
-    def check_valid(subset_df,consecutive_transitions_per_class):
+    def check_valid(self,subset_df,consecutive_transitions_per_class):
     
         # Note: Essentially we check validity against P instead of E. 
         # In the paper of LOCM2, it isn't mentioned how to check against E.
@@ -265,7 +311,7 @@ class Transition:
         # return True if all ordered pairs found.
         return True
     
-    def locm2_get_transition_sets_per_class(holes_per_class, transitions_per_class, consecutive_transitions_per_class, class_names):
+    def locm2_get_transition_sets_per_class(self,holes_per_class, transitions_per_class, consecutive_transitions_per_class, adjacency_matrix_list):
         """LOCM 2 Algorithm in the original LOCM2 paper"""
         
         # contains Solution Set S for each class.
@@ -273,8 +319,8 @@ class Transition:
 
         # for each hole for a class/sort
         for index, holes in enumerate(holes_per_class):
-            class_name = class_names[index]
-            printmd("### "+  class_name)
+            type_name = self.type_names[index]
+            printmd("### "+  type_name)
             
             # S
             transition_set_list = [] #transition_sets_of_a_class, # intially it's empty
@@ -310,13 +356,13 @@ class Transition:
                             s_well_formed_and_valid = False
                             for s in candidate_sets:
                                 if len(s)>=i:
-                                    printmd("Checking candidate set *" + str(s) + "* of class **" + class_name + "** for well formedness and Validity")
+                                    printmd("Checking candidate set *" + str(s) + "* of class **" + type_name + "** for well formedness and Validity")
                                     subset_df = adjacency_matrix_list[index].loc[list(s),list(s)]
                                     print_table(subset_df)
 
                                     # checking for well-formedness
                                     well_formed_flag = False
-                                    well_formed_flag = check_well_formed(subset_df)
+                                    well_formed_flag = self.check_well_formed(subset_df)
                                     if not well_formed_flag:
                                         print("This subset is NOT well-formed")
                                         
@@ -325,7 +371,7 @@ class Transition:
                                         # if well-formed validate across the data E
                                         # to remove inappropriate dead-ends
                                         valid_against_data_flag = False
-                                        valid_against_data_flag = check_valid(subset_df, consecutive_transitions_per_class)
+                                        valid_against_data_flag = self.check_valid(subset_df, consecutive_transitions_per_class)
                                         if not valid_against_data_flag:
                                             print("This subset is well-formed but invalid against example data")
 
@@ -367,12 +413,12 @@ class Transition:
 
         return transition_sets_per_class
     
-    def mark_start_end_state(class_names):
+    def mark_start_end_state(self, transition_sets_per_class, adjacency_matrix_list):
         state_machines_overall_list = []
 
         for index, ts_class in enumerate(transition_sets_per_class):
             fsms_per_class = []
-            printmd("### "+ class_names[index])
+            printmd("### "+ self.type_names[index])
             num_fsms = len(ts_class)
             print("Number of FSMS:" + str(num_fsms))
             
@@ -432,19 +478,48 @@ class Transition:
                 
 
                     
-                plot_cytographs_fsm(fsm_graph,domain_name)
+                plot_cytographs_fsm(fsm_graph,self.domain_name)
                 df = nx.to_pandas_adjacency(fsm_graph, nodelist=fsm_graph.nodes(), weight = 1)
                 print_table(df)
                 fsms_per_class.append(fsm_graph)
             state_machines_overall_list.append(fsms_per_class)
+        return state_machines_overall_list
 
-    def form_hs():
+    def rename_states(self, state_machines_overall_list):
+        # An Automatic state dictionary is added here where states are 
+        # renamed as 0, 1, 2 etc. for a specific FSM
+
+        state_mappings_class = []
+        state_machines_overall_list_2 = []
+        for index, fsm_graphs in enumerate(state_machines_overall_list):
+            state_mappings_fsm = []
+            fsms_per_class_2 = []
+            printmd("### "+ self.type_names[index])
+            num_fsms = len(fsm_graphs)
+            print("Number of FSMS:" + str(num_fsms))
+            
+            for fsm_no, G in enumerate(fsm_graphs):
+                
+                state_mapping = {k: v for v, k in enumerate(G.nodes())}
+                G_copy = nx.relabel_nodes(G, state_mapping)
+                
+                plot_cytographs_fsm(G, self.domain_name)
+                plot_cytographs_fsm(G_copy, self.domain_name)
+                printmd("Fsm "+ str(fsm_no))
+                fsms_per_class_2.append(G_copy)
+                state_mappings_fsm.append(state_mapping)
+                
+            state_machines_overall_list_2.append(fsms_per_class_2)
+            state_mappings_class.append(state_mappings_fsm)
+        return state_mappings_class, state_machines_overall_list_2
+
+    def form_hs(self, transition_sets_per_class, adjacency_matrix_list):
         HS_list = []
         ct_list = []
 
         # for transition set of each class
         for index, ts_class in enumerate(transition_sets_per_class):
-            printmd("### "+ class_names[index])
+            printmd("### "+ self.type_names[index])
             
             ct_per_class = []
             HS_per_class = []
@@ -476,7 +551,7 @@ class Transition:
                     l = int(ct[1].split('.')[1]) # argument index of T2                    
                     # When both actions B and C contain another argument of the same sort G' in position k' and l' respectively, 
                     # we hypothesise that there may be a relation between sorts G and G'.
-                    for seq in sequences:
+                    for seq in self.raw_seqs:
                         for actarg_tuple in seq:
                             arglist1 = []
                             arglist2 = []
@@ -492,12 +567,12 @@ class Transition:
                                 # for arg lists of actions B and C, if class is same add a hypothesis set.
                                 for i in range(len(arglist1)): # if len is 0, we don't go in
                                     for j in range(len(arglist2)):
-                                        class1 = get_class_index(arglist1[i], classes)
-                                        class2 = get_class_index(arglist2[j], classes)
+                                        class1 = self.get_type_index(arglist1[i])
+                                        class2 = self.get_type_index(arglist2[j])
                                         if class1 == class2: # if object at same position have same classes
                                             # add hypothesis to hypothesis set.
                                             if (k!=i) and (l!=j):
-                                                HS.add((frozenset({"e("+B+"."+ str(k)+")", "s("+C+"."+str(l)+")"}),B,k,i,C,l,j,class_names[index],class_names[class1]))
+                                                HS.add((frozenset({"e("+B+"."+ str(k)+")", "s("+C+"."+str(l)+")"}),B,k,i,C,l,j,self.type_names[index],self.type_names[class1]))
                 print(str(len(HS))+ " hypothesis created")
         #         for h in HS:
         #             print(h)
@@ -505,11 +580,12 @@ class Transition:
                 HS_per_class.append(HS)
             HS_list.append(HS_per_class)
             ct_list.append(ct_per_class)
+        return HS_list
 
-    def test_hs():
+    def test_hs(self,HS_list):
         HS_list_retained = []
         for index, HS_class in enumerate(HS_list):
-            printmd("### "+ class_names[index])
+            printmd("### "+ self.type_names[index])
             HS_per_class_retained = []
 
 
@@ -522,10 +598,10 @@ class Transition:
 
                 
                 # for each object O occuring in Ou
-                for O in arguments:
+                for O in self.raw_arguments:
                     #   for each pair of transitions Ap.m and Aq.n consecutive for O in seq
                     ct = []
-                    for seq in sequences:
+                    for seq in self.raw_seqs:
                         for actarg_tuple in seq:
                             act = actarg_tuple[0]
                             for j, arg in enumerate(actarg_tuple[1]):
@@ -560,8 +636,9 @@ class Transition:
         #             print(H)
                 HS_per_class_retained.append(HS_copy)
             HS_list_retained.append(HS_per_class_retained)
+        return HS_list_retained
     
-    def create_and_merge_state_params():
+    def create_and_merge_state_params(self,HS_list_retained, state_machines_overall_list):
         param_bindings_list_overall = []
         for classindex, HS_per_class in enumerate(HS_list_retained):
             param_bind_per_class = []
@@ -633,7 +710,7 @@ class Transition:
                         
                 
                 param_bind_per_class.append(param_binding_list)
-                print(class_names[classindex])
+                print(self.type_names[classindex])
                 
                 # set of params per class
                 param = set()
@@ -645,11 +722,12 @@ class Transition:
                 printmd("No. of params earlier:" + str(len(param_binding_list)))
                 printmd("No. of params after merging:" + str(len(param)))
             param_bindings_list_overall.append(param_bind_per_class)
+        return param_bindings_list_overall
     
-    def remove_param_flaws():
+    def remove_param_flaws(self, param_bindings_list_overall, state_machines_overall_list):
         para_bind_overall_fault_removed  = []
         for classindex, fsm_per_class in enumerate(state_machines_overall_list):
-            print(class_names[classindex])
+            print(self.type_names[classindex])
             pb_per_class_fault_removed = []
 
             for fsm_no, G in enumerate(fsm_per_class):
@@ -699,19 +777,20 @@ class Transition:
                 
                 pb_per_class_fault_removed.append(pb_per_fsm_fault_removed)
             para_bind_overall_fault_removed.append(pb_per_class_fault_removed)
+        return para_bind_overall_fault_removed
     
     def extract_static_pre():
         pass
 
-    def form_pddl(domain_name, class_names):
+    def form_pddl(self, para_bind_overall_fault_removed, state_machines_overall_list):
         print(";;********************Learned PDDL domain******************")
-        output_file = "output/"+ domain_name + "/" +  domain_name + ".pddl"
+        output_file = "output/"+ self.domain_name + "/" +  self.domain_name + ".pddl"
         write_file = open(output_file, 'w')
         write_line = "(define"
-        write_line += "  (domain "+ domain_name+")\n"
+        write_line += "  (domain "+ self.domain_name+")\n"
         write_line += "  (:requirements :typing)\n"
         write_line += "  (:types"
-        for class_name in class_names:
+        for class_name in self.type_names:
             write_line += " " + class_name
         write_line += ")\n"
         write_line += "  (:predicates\n"
@@ -726,8 +805,8 @@ class Transition:
                     state_set = set(state.split('|'))
                     predicate = ""
             
-                    write_line += "    (" + class_names[class_index] + "_fsm" + str(fsm_no) + "_" +  state
-                    predicate += "    (" + class_names[class_index] + "_fsm" + str(fsm_no) + "_" + state
+                    write_line += "    (" + self.type_names[class_index] + "_fsm" + str(fsm_no) + "_" +  state
+                    predicate += "    (" + self.type_names[class_index] + "_fsm" + str(fsm_no) + "_" + state
                     for pb in pbs_per_fsm:
                             if set(pb[0][0]) <= state_set:
                                 if " ?"+pb[1] + " - " + str(pb[0][8]) not in predicate:
@@ -739,7 +818,7 @@ class Transition:
                     predicates.append(predicate)
         write_line += "  )\n"
                     
-        for action_index, action in enumerate(actions):
+        for action_index, action in enumerate(self.raw_actions):
             write_line += "\n"
             write_line += "  (:action"
             write_line += "  " + action + " "
@@ -748,13 +827,13 @@ class Transition:
             arg_already_written_flag = False
             params_per_action = []
             args_per_action = []
-            for seq in sequences:
+            for seq in self.raw_seqs:
                 for actarg_tuple in seq:
                     if not arg_already_written_flag:
                         if actarg_tuple[0] == action:
                             arglist = []
                             for arg in actarg_tuple[1]:
-                                write_line += "?"+arg + " - " + class_names[get_class_index(arg,classes)] + " "
+                                write_line += "?"+arg + " - " + self.type_names[self.get_type_index(arg)] + " "
                                 arglist.append(arg)
                             args_per_action.append(arglist)
                             params_per_action.append(actarg_tuple[1])
@@ -768,7 +847,7 @@ class Transition:
             effects = []
             for arglist in params_per_action:
                 for arg in arglist:
-                    current_class_index = get_class_index(arg, classes)
+                    current_class_index = self.get_type_index(arg)
                     for fsm_no, G in enumerate(state_machines_overall_list[current_class_index]):
         #                
                         for start, end, weight in G.edges(data='weight'):
@@ -784,7 +863,7 @@ class Transition:
 
 
 
-                                        if clss == class_names[current_class_index]:
+                                        if clss == self.type_names[current_class_index]:
                                             if fsm == "fsm" + str(fsm_no):
 
                                                 if state == set(start.split('|')):
@@ -822,15 +901,15 @@ class Transition:
         write_file.write(write_line)
         write_file.close()
 
-    def validate_and_fix_pddl(domain_name, class_names):
+    def validate_and_fix_pddl(self,para_bind_overall_fault_removed, state_mappings_class, state_machines_overall_list,state_machines_overall_list_2):
         print(";;********************Fixed PDDL domain******************")
-        output_file = "output/"+ domain_name + "/" +  domain_name + ".pddl"
+        output_file = "output/"+ self.domain_name + "/" +  self.domain_name + ".pddl"
         write_file = open(output_file, 'w')
         write_line = "(define"
-        write_line += "  (domain "+ domain_name+")\n"
+        write_line += "  (domain "+ self.domain_name+")\n"
         write_line += "  (:requirements :typing)\n"
         write_line += "  (:types"
-        for class_name in class_names:
+        for class_name in self.type_names:
             write_line += " " + class_name
         write_line += ")\n"
         write_line += "  (:predicates\n"
@@ -847,8 +926,8 @@ class Transition:
                     state_set = set(state.split('|'))
                     predicate = ""
             
-                    write_line += "    (" + class_names[class_index] + "_fsm" + str(fsm_no) + "_state" +  str(state_mapping[state])
-                    predicate += "    (" + class_names[class_index] + "_fsm" + str(fsm_no) + "_state" + str(state_mapping[state])
+                    write_line += "    (" + self.type_names[class_index] + "_fsm" + str(fsm_no) + "_state" +  str(state_mapping[state])
+                    predicate += "    (" + self.type_names[class_index] + "_fsm" + str(fsm_no) + "_state" + str(state_mapping[state])
                     for pb in pbs_per_fsm:
                             if set(pb[0][0]) <= state_set:
                                 if " ?"+pb[1] + " - " + str(pb[0][8]) not in predicate:
@@ -860,7 +939,7 @@ class Transition:
                     predicates.append(predicate)
         write_line += "  )\n"
                     
-        for action_index, action in enumerate(actions):
+        for action_index, action in enumerate(self.raw_actions):
             write_line += "  (:action"
             write_line += "  " + action + " "
             write_line += "  :parameters"
@@ -868,13 +947,13 @@ class Transition:
             arg_already_written_flag = False
             params_per_action = []
             args_per_action = []
-            for seq in sequences:
+            for seq in self.raw_seqs:
                 for actarg_tuple in seq:
                     if not arg_already_written_flag:
                         if actarg_tuple[0] == action:
                             arglist = []
                             for arg in actarg_tuple[1]:
-                                write_line += "?"+arg + " - " + class_names[get_class_index(arg,classes)] + " "
+                                write_line += "?"+arg + " - " + self.type_names[self.get_type_index(arg)] + " "
                                 arglist.append(arg)
                             args_per_action.append(arglist)
                             params_per_action.append(actarg_tuple[1])
@@ -888,7 +967,7 @@ class Transition:
             effects = []
             for arglist in params_per_action:
                 for arg in arglist:
-                    current_class_index = get_class_index(arg, classes)
+                    current_class_index = self.get_type_index(arg)
                     for fsm_no, G in enumerate(state_machines_overall_list[current_class_index]):
                         G_int = state_machines_overall_list_2[current_class_index][fsm_no]
                         state_mapping = state_mappings_class[current_class_index][fsm_no]
@@ -902,7 +981,7 @@ class Transition:
                                         fsm = pred.split('_')[1]
                                         state_ind = pred.split('_')[2].rstrip(")")[-1]
 
-                                        if clss == class_names[current_class_index]:
+                                        if clss == self.type_names[current_class_index]:
                                             if fsm == "fsm" + str(fsm_no):
                                                 if int(state_ind) == int(start):
                                                     if predicate not in preconditions:
@@ -948,3 +1027,4 @@ print()
 print(t.raw_actarg.items())
 print()
 print(t.raw_types)
+t.locm()
