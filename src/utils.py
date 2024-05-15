@@ -26,17 +26,15 @@ def print_table(matrix):
 def printmd(string):
     display(Markdown(string))
 
-def save(graphs,class_names, domain_name):
+def save(graphs):
     adjacency_matrix_list = [] # list of adjacency matrices per class
-    
     for index, G in enumerate(graphs):
-        nx.write_graphml(G, "output/"+ domain_name + "/" +  class_names[index] + ".graphml")
         df = nx.to_pandas_adjacency(G, nodelist=G.nodes(), dtype=int)
         adjacency_matrix_list.append(df)
 #         print_table(df)
     return adjacency_matrix_list
 
-def plot_cytographs(graphs, domain_name,class_names, aml):
+def plot_cytographs(graphs,sort_names, aml):
     cytoscapeobs = []
     for index, G in enumerate(graphs):
             cytoscapeobj = CytoscapeWidget()
@@ -58,7 +56,8 @@ def plot_cytographs(graphs, domain_name,class_names, aml):
 #             cytoscapeobj.graph.add_graph_from_df(aml[index],aml[index].columns.tolist())
             cytoscapeobs.append(cytoscapeobj)
 #             print(cytoscapeobj)
-            printmd('## class **'+class_names[index]+'**')
+            printmd('## class **'+sort_names[index]+'**')
+            
             print_table(aml[index])
     #         print("Nodes:{}".format(G.nodes()))
     #         print("Edges:{}".format(G.edges()))
@@ -120,6 +119,7 @@ def plot_cytographs(graphs, domain_name,class_names, aml):
             cytoscapeobj.min_zoom = 0.5
             display(cytoscapeobj)
     return cytoscapeobs
+
 
 def plot_cytographs_fsm(graph, domain_name):
     cytoscapeobj = CytoscapeWidget()

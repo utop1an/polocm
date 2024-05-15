@@ -1015,16 +1015,3 @@ class Transition:
 
         write_file.write(write_line)
         write_file.close()
-
-seqs = file_reader.read_action_seqs('test_input.txt')
-t = Transition(seqs)
-print(t.raw_actions)
-print()
-print(t.raw_arguments)
-print()
-print(t.raw_transistions)
-print()
-print(t.raw_actarg.items())
-print()
-print(t.raw_types)
-t.locm()
