@@ -9,7 +9,7 @@ import pandas as pd
 pd.options.display.max_columns = 100
 from IPython.display import display, Markdown
 from ipycytoscape import *
-from utils import *
+from helpers import *
 
 class Object: # Objects...
     raw_name: str
@@ -253,10 +253,6 @@ class LearningProblem:
         for sort in self.sorts:
             graphs.append(nx.DiGraph())
 
-        predicate_graphs = []
-        for _ in self.predicate_sorts.keys():
-            predicate_graphs.append(nx.DiGraph())
-
         consecutive_transition_lists = [] #list of consecutive transitions per object instance per sequence.
         
         # build transitions for single sort
@@ -286,6 +282,38 @@ class LearningProblem:
 
             consecutive_transition_lists.append([n, 'zero', consecutive_transition_list])
 
+
+        # for all consecutive transitions add edges to the appropriate graphs.
+        for cons_trans_list in consecutive_transition_lists:
+            # print(cons_trans_list)
+            seq_no = cons_trans_list[0]  # get sequence number
+            obj = cons_trans_list[1]  # get argument
+            sort_index = self.get_sort_index(obj)  # get index of class
+            # add directed edges to graph of that class
+            for i in range(0, len(cons_trans_list[2]) - 1):
+                    if graphs[sort_index].has_edge(cons_trans_list[2][i], cons_trans_list[2][i + 1]):
+                        graphs[sort_index][cons_trans_list[2][i]][cons_trans_list[2][i + 1]]['weight'] += 1
+                    else:
+                        graphs[sort_index].add_edge(cons_trans_list[2][i], cons_trans_list[2][i + 1], weight=1)
+
+        
+        # save all the graphs
+        adjacency_matrix_list = [] # list of adjacency matrices per class
+        for index, G in enumerate(graphs):
+            df = nx.to_pandas_adjacency(G, nodelist=G.nodes(), dtype=int)
+            adjacency_matrix_list.append(df)
+        self.adjacency_matrix_list = adjacency_matrix_list # list of adjacency matrices per class
+       
+        # plot cytoscape interactive graphs
+        cytoscapeobs = plot_cytographs(graphs, self.sort_names, self.adjacency_matrix_list)
+        
+        
+
+    def build_predicate_transition_graphs(self):
+        predicate_graphs = []
+        for _ in self.predicate_sorts.keys():
+            predicate_graphs.append(nx.DiGraph())
+        
         # build transitions for group of sorts evidenced as args in predicates
         consecutive_predicate_transition_lists = []
         for x, seq in enumerate(self.state_seqs): # for all state seqs
@@ -309,19 +337,6 @@ class LearningProblem:
 
                         consecutive_predicate_transition_lists.append([n, predicate[0], consecutive_predicate_transition_list])
 
-        # for all consecutive transitions add edges to the appropriate graphs.
-        for cons_trans_list in consecutive_transition_lists:
-            # print(cons_trans_list)
-            seq_no = cons_trans_list[0]  # get sequence number
-            obj = cons_trans_list[1]  # get argument
-            sort_index = self.get_sort_index(obj)  # get index of class
-            # add directed edges to graph of that class
-            for i in range(0, len(cons_trans_list[2]) - 1):
-                    if graphs[sort_index].has_edge(cons_trans_list[2][i], cons_trans_list[2][i + 1]):
-                        graphs[sort_index][cons_trans_list[2][i]][cons_trans_list[2][i + 1]]['weight'] += 1
-                    else:
-                        graphs[sort_index].add_edge(cons_trans_list[2][i], cons_trans_list[2][i + 1], weight=1)
-
         for cptl in consecutive_predicate_transition_lists:
             predicate_name = cptl[1]
             predicate_sort_index = self.get_predicate_sort_index(predicate_name)
@@ -331,17 +346,6 @@ class LearningProblem:
                 else:
                     predicate_graphs[predicate_sort_index].add_edge(cptl[2][i], cptl[2][i + 1], weight=1)
 
-        
-        # save all the graphs
-        adjacency_matrix_list = [] # list of adjacency matrices per class
-        for index, G in enumerate(graphs):
-            df = nx.to_pandas_adjacency(G, nodelist=G.nodes(), dtype=int)
-            adjacency_matrix_list.append(df)
-        self.adjacency_matrix_list = adjacency_matrix_list # list of adjacency matrices per class
-       
-        # plot cytoscape interactive graphs
-        cytoscapeobs = plot_cytographs(graphs, self.sort_names, self.adjacency_matrix_list)
-        
         predicate_adjacency_matrix_list = []
         for _,G in enumerate(predicate_graphs):
             df = nx.to_pandas_adjacency(G, nodelist=G.nodes(), dtype=int)
@@ -360,43 +364,47 @@ class LearningProblem:
 
         self.transition_sets_per_sort = self.locm2_get_transition_sets_per_sort()
 
-        
-
 
     def get_adjacency_matrix_with_holes(self, adjacency_matrix_list):
         adjacency_matrix_list_with_holes = []
         for index,adjacency_matrix in enumerate(adjacency_matrix_list):
-            df = adjacency_matrix.copy()
-            df1 = adjacency_matrix.copy()
+            if index == 0: # do nothing with the zero sort
+                adjacency_matrix_list_with_holes.append(adjacency_matrix.copy())
+            else: 
+                df = adjacency_matrix.copy()
+                df1 = adjacency_matrix.copy()
 
-            # for particular adjacency matrix's copy, loop over all pairs of rows
-            for i in range(df.shape[0] - 1):
-                for j in range(i+1, df.shape[0]):
-                    idx1, idx2 = i, j
-                    row1, row2 = df.iloc[idx1,:], df.iloc[idx2, :] #we have now all pairs of rows
+                # for particular adjacency matrix's copy, loop over all pairs of rows
+                for i in range(df.shape[0] - 1):
+                    for j in range(i+1, df.shape[0]):
+                        idx1, idx2 = i, j
+                        row1, row2 = df.iloc[idx1,:], df.iloc[idx2, :] #we have now all pairs of rows
 
-                    common_values_flag = False #for each two rows we have a common_values_flag
+                        common_values_flag = False #for each two rows we have a common_values_flag
 
-                    # if there is a common value between two rows, turn common value flag to true
-                    for col in range(row1.shape[0]):
-                        if row1.iloc[col] > 0 and row2.iloc[col] > 0:
-                            common_values_flag = True
-                            break
-
-                    # now if two rows have common values, we need to check for holes.
-                    if common_values_flag:
+                        # if there is a common value between two rows, turn common value flag to true
                         for col in range(row1.shape[0]):
-                            if row1.iloc[col] > 0 and row2.iloc[col] == 0:
-                                df1.iloc[idx2,col] = 'hole'
-                            elif row1.iloc[col] == 0 and row2.iloc[col] > 0:
-                                df1.iloc[idx1, col] = 'hole'
+                            if row1.iloc[col] > 0 and row2.iloc[col] > 0:
+                                common_values_flag = True
+                                break
 
-            adjacency_matrix_list_with_holes.append(df1)
+                        # now if two rows have common values, we need to check for holes.
+                        if common_values_flag:
+                            for col in range(row1.shape[0]):
+                                if row1.iloc[col] > 0 and row2.iloc[col] == 0:
+                                    df1.iloc[idx2,col] = 'hole'
+                                elif row1.iloc[col] == 0 and row2.iloc[col] > 0:
+                                    df1.iloc[idx1, col] = 'hole'
+
+                adjacency_matrix_list_with_holes.append(df1)
+
+                
         return adjacency_matrix_list_with_holes
     
     def get_holes_per_sort(self, aml_with_holes, sort_names):
         holes_per_sort = []
         for index,df in enumerate(aml_with_holes):
+            
             holes = set()
             for i in range(df.shape[0]):
                 for j in range(df.shape[1]):
@@ -408,8 +416,6 @@ class LearningProblem:
             print("#holes in sort " + sort_names[i]+":" + str(len(hole)))
 
         return holes_per_sort
-        
-        
         
 
     def get_transition_per_sort(self, aml_with_holes):
@@ -595,6 +601,21 @@ class LearningProblem:
             transition_sets_per_sort.append(transition_set_list)
         return transition_sets_per_sort
     
+    def test_covering_holes(self):
+        ts1 = self.transition_sets_per_sort[1][0]
+        ts2 = self.transition_sets_per_sort[1][1]
+
+
+        newTs = ts1.union(ts2)
+        print(newTs)
+
+        newTs_df = self.adjacency_matrix_list[1].loc[list(newTs), list(newTs)]
+        f1= self.check_well_formed(newTs_df)
+        print(f1)
+        f2= self.check_valid(newTs_df, self.consecutive_transitions_per_sort)
+        print(f2)
+
+        
     def locm(self):
         self.state_machines_overall_list = self.unify_start_and_end()
         state_mappings_sort, state_machines_overall_list_2 = self.rename_state()
@@ -645,9 +666,6 @@ class LearningProblem:
                                     if "s("+t_df.index[j]+")" in node:
                                         merge_node2 = node
                                 
-                                
-                                
-
                                 fsm_graph = nx.contracted_nodes(fsm_graph, merge_node1, merge_node2 , self_loops=True)
 
                                 if merge_node1 != merge_node2:
@@ -712,20 +730,20 @@ class LearningProblem:
         HS_list = []
         ct_list = []
 
-        # for transition set of each class
+        # for transition set of each sort
         for index, ts_class in enumerate(self.transition_sets_per_sort):
             printmd("### "+ self.sort_names[index])
             
             ct_per_sort = []
             HS_per_sort = []
             
-            # for transition set of each fsm in a class
+            # for transition set of each fsm in a sort
             for fsm_no, ts in enumerate(ts_class):
                 printmd("#### FSM: " + str(fsm_no) + " Hypothesis Set")
                 
                 # transition matrix for the ts
                 t_df = self.adjacency_matrix_list[index].loc[list(ts), list(ts)]
-                ct_in_fsm = set()  # find consecutive transition set for a state machine in a class.
+                ct_in_fsm = set()  # find consecutive transition set for a state machine in a sort.
                 for i in range(t_df.shape[0]):
                     for j in range(t_df.shape[1]):
                         if t_df.iloc[i, j] != 'hole':
