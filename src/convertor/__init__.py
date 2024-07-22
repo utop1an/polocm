@@ -1,5 +1,5 @@
-from .tp_convertor import TPConvertor
+from .topo_convertor import TopoConvertor
 
 __all__ = [
-    "TPConvertor"
+    "TopoConvertor"
 ]

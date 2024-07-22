@@ -10,7 +10,7 @@ import itertools
 
 
 
-class TPConvertor:
+class TopoConvertor:
     """
     Given...
     """
