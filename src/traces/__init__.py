@@ -5,6 +5,8 @@ from .state import State
 from .partial_state import PartialState
 from .trace import Trace, SAS
 from .trace_list import TraceList
+from .partial_ordered_step import PartialOrderedStep
+from .partial_ordered_trace import PartialOrderedTrace
 
 __all__ = [
     "Action",
@@ -15,5 +17,7 @@ __all__ = [
     "PartialState",
     "Trace",
     "SAS",
-    "TraceList"
+    "TraceList",
+    "PartialOrderedStep",
+    "PartialOrderedTrace"
 ]

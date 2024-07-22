@@ -1,8 +1,7 @@
 from warnings import warn
 from typing import Set
 from utils import PercentError
-from traces import Step, Fluent
-from traces import PartialState
+from traces import Step, Fluent, PartialState
 from . import Observation, InvalidQueryParameter
 
 

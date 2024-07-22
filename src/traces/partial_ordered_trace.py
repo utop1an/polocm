@@ -6,28 +6,16 @@ from warnings import warn
 from rich.table import Table
 from rich.text import Text
 from rich.console import Console
+from .trace import Trace, SAS
 from .action import Action
-from .step import Step
-from .state import State
+from .partial_ordered_step import PartialOrderedStep
 from observation import Observation, NoisyPartialDisorderedParallelObservation
+import pandas as pd
+
 from utils import TokenizationError
 
 
-@dataclass
-class SAS:
-    pre_state: State
-    action: Action
-    post_state: State
-
-    def __hash__(self):
-        return hash(
-            str(self.pre_state.details())
-            + self.action.details()
-            + str(self.post_state.details())
-        )
-
-
-class Trace:
+class PartialOrderedTrace(Trace):
     """A state trace of a planning problem.
 
     A `list`-like object, where each element is a step of the state trace.
@@ -41,13 +29,7 @@ class Trace:
             The set of actions in the trace.
     """
 
-    class InvalidCostRange(Exception):
-        """Raised when an invalid range to retrieve costs is provided."""
-
-        def __init__(self, message):
-            super().__init__(message)
-
-    def __init__(self, steps: List[Step] = None):
+    def __init__(self, steps: List[PartialOrderedStep] = None, degree_of_disorder=None, comparable_matrix= None):
         """Initializes a Trace with an optional list of steps.
 
         Args:
@@ -56,15 +38,17 @@ class Trace:
                 `list`.
         """
         self.steps = steps if steps is not None else []
+        self.degree_of_disorder = degree_of_disorder
+        self.comparable_matrix = comparable_matrix
         self.__reinit_actions_and_fluents()
 
     def __eq__(self, other):
-        return isinstance(other, Trace) and self.steps == other.steps
+        return isinstance(other, PartialOrderedTrace) and self.steps == other.steps
 
     def __len__(self):
         return len(self.steps)
 
-    def __setitem__(self, key: int, value: Step):
+    def __setitem__(self, key: int, value: PartialOrderedStep):
         self.steps[key] = value
 
     def __getitem__(self, key: int):
@@ -79,10 +63,10 @@ class Trace:
     def __reversed__(self):
         return reversed(self.steps)
 
-    def __contains__(self, step: Step):
+    def __contains__(self, step: PartialOrderedStep):
         return step in self.steps
 
-    def append(self, step: Step):
+    def append(self, step: PartialOrderedStep):
         self.steps.append(step)
         self.__update_actions_and_fluents(step)
 
@@ -94,18 +78,18 @@ class Trace:
     def copy(self):
         return self.steps.copy()
 
-    def count(self, value: Step):
+    def count(self, value: PartialOrderedStep):
         return self.steps.count(value)
 
-    def extend(self, iterable: Iterable[Step]):
+    def extend(self, iterable: Iterable[PartialOrderedStep]):
         self.steps.extend(iterable)
         for step in iterable:
             self.__update_actions_and_fluents(step)
 
-    def index(self, value: Step):
+    def index(self, value: PartialOrderedStep):
         return self.steps.index(value)
 
-    def insert(self, index: int, item: Step):
+    def insert(self, index: int, item: PartialOrderedStep):
         self.steps.insert(index, item)
         self.__update_actions_and_fluents(item)
 
@@ -114,7 +98,7 @@ class Trace:
         self.__reinit_actions_and_fluents()
         return result
 
-    def remove(self, value: Step):
+    def remove(self, value: PartialOrderedStep):
         self.steps.remove(value)
         self.__reinit_actions_and_fluents()
 
@@ -251,17 +235,19 @@ class Trace:
 
         return static
 
-    def __update_actions_and_fluents(self, step: Step):
+
+    def __update_actions_and_fluents(self, step: PartialOrderedStep):
         """Updates the actions and fluents stored in this trace with any new ones from
         the provided step.
 
         Args:
-            step (Step):
+            step (PartialOrderedStep):
                 The step to extract the possible new fluents and actions from.
         """
         self.fluents.update(step.state.keys())
         if step.action:
             self.actions.add(step.action)
+        
 
     def __reinit_actions_and_fluents(self):
         """Reinitializes the actions and fluents stored in this trace, taking all current
