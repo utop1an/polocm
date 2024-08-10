@@ -19,15 +19,20 @@ class TopoConvertor:
     measurement: callable
     batch_destroy: bool
     strict: bool
+    reorder: bool
+    seed: int
     
-    def __init__(self, measurement:str='flex', strict = False):
+    def __init__(self, measurement:str='flex', strict = False, reorder = True, rand_seed: int= None):
        
         if (measurement == 'width'):
             self.measurement = self.width
         else:
             self.measurement = self.flex
         self.strict = strict
-        
+        self.reorder = reorder
+        self.seed = rand_seed
+        if self.seed:
+            seed(self.seed)
 
     def flex(self, cm: pd.DataFrame):
         """
@@ -73,15 +78,30 @@ class TopoConvertor:
             for j in range(i+1, len(matrix)):
                 current = matrix.iloc[i,j]
                 if (not pd.isna(current)):
-                    for x in range(1, len(matrix)-j):
+                    for x in range(1, len(matrix)-1):
+                        if (j+x)%len(matrix) == i:
+                                continue
+                        pivoting = False
                         if (j+x < len(matrix)):
+                            pivoting = False
                             next = matrix.iloc[j, j+x]
                         else:
+                            pivoting = True
                             pivot = matrix.iloc[(j+x)%len(matrix), j]
                             if (not pd.isna(pivot)):
                                 next = not pivot
+                            else:
+                                next = pivot
                         if (current == next):
-                            matrix.iloc[i, j+x] = current
+                            
+                            if (pivoting):
+                                if (i>(j+x)%len(matrix)):
+                                    matrix.iloc[(j+x)%len(matrix), i] = not current
+                                else:
+                                    matrix.iloc[i, (j+x)%len(matrix)] = current
+                                   
+                            else:
+                                matrix.iloc[i, j+x] = current
                         
 
         return matrix
@@ -95,7 +115,6 @@ class TopoConvertor:
         return cm
 
     def getPOComparableMatrix(self,input_dod, input_cm: pd.DataFrame):
-
         def destroy(target_dod):
             while target_dod < input_dod:
                 if (len(candidates) == 0 ):
@@ -139,9 +158,11 @@ class TopoConvertor:
         for i in range(len(cm)):
             for j in range(i+1, len(cm)):
                 if cm.iloc[i,j] == 1:
-                    po_steps[i].successors.append(j)
+                    po_steps[i].successors.append(j) 
                 elif cm.iloc[i,j] == 0:
                     po_steps[j].successors.append(i)
+        if self.reorder:
+            shuffle(po_steps)
         
         return PartialOrderedTrace(po_steps, dod, cm)
     

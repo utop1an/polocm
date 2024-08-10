@@ -33,3 +33,6 @@ class Step:
         self.state = state
         self.action = action
         self.index = index
+
+    def __str__(self) -> str:
+        return f"{self.action.name}[{self.index}]"

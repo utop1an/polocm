@@ -6,6 +6,8 @@ from .noisy_observation import NoisyObservation
 from .noisy_partial_observation import NoisyPartialObservation
 from .noisy_partial_disordered_parallel_observation import NoisyPartialDisorderedParallelObservation
 from .partial_ordered_action_observation import PartialOrderedActionObservation
+from .observed_partial_order_trace import ObservedPartialOrderTrace
+from .observed_partial_order_tracelist import ObservedPartialOrderTraceList
 
 __all__ = [
     "Observation",
@@ -15,5 +17,7 @@ __all__ = [
     "PartialObservation",
     "NoisyPartialObservation",
     "NoisyPartialDisorderedParallelObservation",
-    "PartialOrderedActionObservation"
+    "PartialOrderedActionObservation",
+    "ObservedPartialOrderTrace",
+    "ObservedPartialOrderTraceList"
 ]

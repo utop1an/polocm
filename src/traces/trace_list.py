@@ -4,6 +4,7 @@ from warnings import warn
 
 from observation import Observation, ObservedTraceList
 from . import Action, Trace
+from convertor import TopoConvertor
 
 
 class TraceList(MutableSequence):
@@ -116,6 +117,23 @@ class TraceList(MutableSequence):
             for step in trace:
                 fluents.update(step.state.fluents)
         return fluents
+    
+    def topo(self, convertor: TopoConvertor, dod: Union[float, int]):
+        """Generating partial ordered traces
+
+        Args:
+            convertor (TopoConvertor):
+                the way to convert
+            dod:
+                degree of disorder, 1 means totally disordered, 0 means totally ordered
+        Returns:
+            A TraceList with partial ordered traces
+        """
+        po_traces = []
+        for trace in self.traces:
+            po_trace = convertor.convert(trace, dod)
+            po_traces.append(po_trace)
+        return TraceList(po_traces, self.generator)
 
     def tokenize(
         self,

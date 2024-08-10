@@ -39,3 +39,6 @@ class PartialOrderedStep(Step):
         self.action = action
         self.index = index
         self.successors = successors
+
+    def __str__(self) -> str:
+        return f"{self.action.name} [{self.index}]"

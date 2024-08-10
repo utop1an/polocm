@@ -9,7 +9,7 @@ from rich.console import Console
 from .trace import Trace, SAS
 from .action import Action
 from .partial_ordered_step import PartialOrderedStep
-from observation import Observation, NoisyPartialDisorderedParallelObservation
+from observation import Observation, NoisyPartialDisorderedParallelObservation,  ObservedPartialOrderTrace
 import pandas as pd
 
 from utils import TokenizationError
@@ -52,7 +52,10 @@ class PartialOrderedTrace(Trace):
         self.steps[key] = value
 
     def __getitem__(self, key: int):
-        return self.steps[key]
+        for step in self.steps:
+            if (step.index == key):
+                return step
+        return None
 
     def __delitem__(self, key: int):
         del self.steps[key]
@@ -400,4 +403,4 @@ class PartialOrderedTrace(Trace):
         """
         if Token == NoisyPartialDisorderedParallelObservation:
             raise TokenizationError(Token)
-        return [Token(step=step, **kwargs) for step in self]
+        return ObservedPartialOrderTrace([Token(step=step, **kwargs) for step in self])
