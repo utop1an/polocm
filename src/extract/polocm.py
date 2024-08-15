@@ -100,7 +100,7 @@ class FSM:
     index: int
 
     def __repr__(self) -> str:
-        return f"FSM.{self.index} @ Sort.{self.sort}"
+        return f"F{self.index}S{self.sort}"
     
     def __hash__(self):
         return hash((self.sort, self.index))
@@ -289,6 +289,7 @@ class POLOCM:
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
 
+        runtime = 0
         obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
         prob, PO_vars_overall, PO_matrix_with_vars = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall,'trace', debug['pstep2'])
         prob, FO_vars_overall, FO_matrix_with_vars, varname_lookup = POLOCM.polocm_step3(prob,PO_vars_overall, PO_matrix_with_vars, obj_trace_FO_matrix_overall, debug['pstep3'])
@@ -322,7 +323,7 @@ class POLOCM:
             for sm in state_machines:
                 sm.render(view=view)
 
-        return Model(fluents, actions)
+        return Model(fluents, actions), AP, runtime
 
     @staticmethod
     def _get_sorts(obs_tracelist: ObservedTraceList, debug=False) -> Sorts:
@@ -1700,7 +1701,7 @@ class POLOCM:
             del OS[zero_fsm]
             del ap_state_pointers[zero_fsm]
             shift = 1
-
+        print(OS)
         if debug:
 
             print("bindings:")
@@ -1720,7 +1721,7 @@ class POLOCM:
 
         actions = {}
         fluents = defaultdict(dict)
-
+        
         all_aps: Dict[str, Set[AP]] = defaultdict(set)
         for aps in ap_state_pointers.values():
             for ap in aps:
@@ -1743,7 +1744,7 @@ class POLOCM:
         for fsm, state_bindings in bound_param_sorts.items():
             for state, bound_sorts in state_bindings.items():
                 fluents[fsm][state] = TemplateFluent(
-                    f"fsm{fsm}_state{state}",
+                    f"{fsm}state{state}",
                     [f"sort{fsm.sort}"]+[f"sort{s}" for s in bound_sorts],
                 )
 
@@ -1801,6 +1802,7 @@ class POLOCM:
                 for static in statics[action.name]:
                     action.update_precond(static)
 
+        
         if debug:
             print('fluents:')
             pprint(fluents)

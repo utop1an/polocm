@@ -162,7 +162,18 @@ class Model:
             raise ValueError(
                 f"Could not determine whether the model is grounded or lifted. Fluents are of type {type(list(self.fluents)[0])} while actions are of type {type(list(self.actions)[0])}"
             )
+    
+    def to_domain_pddl_lifted(
+        self,
+        domain_name: str,
+        domain_filename: str
+    ):
+        self.fluents: Set[LearnedLiftedFluent]
+        self.actions: Set[LearnedLiftedAction]
 
+        lang =tarski.language(domain_name)
+        
+        
     def to_pddl_lifted(
         self,
         domain_name: str,
@@ -199,7 +210,6 @@ class Model:
                         sorts.add(sort)
 
                 lang.predicate(f.name, *f.param_sorts)
-
         if self.actions:
             for a in self.actions:
                 print(a.name)
