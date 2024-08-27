@@ -162,18 +162,7 @@ class Model:
             raise ValueError(
                 f"Could not determine whether the model is grounded or lifted. Fluents are of type {type(list(self.fluents)[0])} while actions are of type {type(list(self.actions)[0])}"
             )
-    
-    def to_domain_pddl_lifted(
-        self,
-        domain_name: str,
-        domain_filename: str
-    ):
-        self.fluents: Set[LearnedLiftedFluent]
-        self.actions: Set[LearnedLiftedAction]
-
-        lang =tarski.language(domain_name)
-        
-        
+                
     def to_pddl_lifted(
         self,
         domain_name: str,
@@ -212,16 +201,13 @@ class Model:
                 lang.predicate(f.name, *f.param_sorts)
         if self.actions:
             for a in self.actions:
-                print(a.name)
-                print(a.precond)
                 vars = [lang.variable(f"x{i}", s) for i, s in enumerate(a.param_sorts)]
-                print(vars)
-                for f in a.precond:
-                    print(f)
-                    print(f.param_act_inds)
+                print(a.name, vars)
                 if len(a.precond) == 1:
                     precond = lang.get(list(a.precond)[0].name)(*[vars[i] for i in a.precond[0].param_act_inds])  # type: ignore
                 else:
+                    for f in a.precond:
+                        print(f.name ,[i for i in f.param_act_inds])
                     precond = CompoundFormula(
                         Connective.And,
                         [
@@ -229,7 +215,6 @@ class Model:
                             for f in a.precond
                         ],
                     )
-
                 adds = [lang.get(f.name)(*[vars[i] for i in f.param_act_inds]) for f in a.add]  # type: ignore
                 dels = [lang.get(f.name)(*[vars[i] for i in f.param_act_inds]) for f in a.delete]  # type: ignore
                 effects = [fs.AddEffect(e) for e in adds] + [fs.DelEffect(e) for e in dels]  # fmt: skip
