@@ -1,6 +1,6 @@
 
 import pddl_parser
-import pddl.normalize as normalize
+import translate.normalize as normalize
 
 class PseudoPlanner:
     def __init__(self, domain_filename) -> None:

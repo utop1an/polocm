@@ -40,7 +40,7 @@ class Effect:
                            for par in self.parameters]
         self.condition = self.condition.uniquify_variables(type_map, renamings)
         self.literal = self.literal.rename_variables(renamings)
-    def instantiate(self, var_mapping,
+    def instantiate(self, var_mapping, init_facts, fluent_facts,
                     objects_by_type, result):
         if self.parameters:
             var_mapping = var_mapping.copy() # Will modify this.
@@ -49,17 +49,17 @@ class Effect:
             for object_tuple in cartesian_product(*object_lists):
                 for (par, obj) in zip(self.parameters, object_tuple):
                     var_mapping[par.name] = obj
-                self._instantiate(var_mapping, result)
+                self._instantiate(var_mapping, init_facts, fluent_facts, result)
         else:
-            self._instantiate(var_mapping, result)
-    def _instantiate(self, var_mapping, result):
+            self._instantiate(var_mapping, init_facts, fluent_facts, result)
+    def _instantiate(self, var_mapping, init_facts, fluent_facts, result):
         condition = []
         try:
-            self.condition.instantiate(var_mapping, condition)
+            self.condition.instantiate(var_mapping, init_facts, fluent_facts, condition)
         except conditions.Impossible:
             return
         effects = []
-        self.literal.instantiate(var_mapping, effects)
+        self.literal.instantiate(var_mapping, init_facts, fluent_facts, effects)
         assert len(effects) <= 1
         if effects:
             result.append((condition, effects[0]))

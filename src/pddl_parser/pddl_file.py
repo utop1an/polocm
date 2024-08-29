@@ -26,9 +26,10 @@ def open(domain_filename=None, task_filename=None):
     """
     Main function of read PDDL files and parse them into PDDL model
     """
-    task_filename = task_filename 
-    domain_filename = domain_filename 
-
     domain_pddl = parse_pddl_file("domain", domain_filename)
+    if task_filename: 
+        task_pddl = parse_pddl_file("task", task_filename)
+    else:
+        task_pddl=None
 
-    return parsing_functions.parse_task(domain_pddl)
+    return parsing_functions.parse_task(domain_pddl, task_pddl)

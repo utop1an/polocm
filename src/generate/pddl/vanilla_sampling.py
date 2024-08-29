@@ -1,7 +1,7 @@
 from tarski.search.operations import progress
 import random
 from . import Generator
-from ...utils import (
+from utils import (
     set_timer_throw_exc,
     TraceSearchTimeOut,
     InvalidTime,
@@ -9,7 +9,7 @@ from ...utils import (
     set_plan_length,
     progress as print_progress,
 )
-from trace import (
+from traces import (
     Step,
     Trace,
     TraceList,
@@ -81,8 +81,7 @@ class VanillaSampling(Generator):
             self.traces = self.generate_traces()
         else:
             self.traces = None
-        if seed:
-            random.seed(seed)
+
 
     def generate_traces(self):
         """Generates traces randomly by uniformly sampling applicable actions to find plans

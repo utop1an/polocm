@@ -84,7 +84,7 @@ class Impossible(Exception):
     pass
 
 class Falsity(ConstantCondition):
-    def instantiate(self, var_mapping, result):
+    def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         raise Impossible()
     def negate(self):
         return Truth()
@@ -92,7 +92,7 @@ class Falsity(ConstantCondition):
 class Truth(ConstantCondition):
     def to_untyped_strips(self):
         return []
-    def instantiate(self, var_mapping, result):
+    def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         pass
     def negate(self):
         return Falsity()
@@ -128,10 +128,10 @@ class Conjunction(JunctorCondition):
         for part in self.parts:
             result += part.to_untyped_strips()
         return result
-    def instantiate(self, var_mapping, result):
+    def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         assert not result, "Condition not simplified"
         for part in self.parts:
-            part.instantiate(var_mapping, result)
+            part.instantiate(var_mapping, init_facts, fluent_facts, result)
     def negate(self):
         return Disjunction([p.negate() for p in self.parts])
 
@@ -264,10 +264,13 @@ class Atom(Literal):
     negated = False
     def to_untyped_strips(self):
         return [self]
-    def instantiate(self, var_mapping, result):
+    def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         args = [var_mapping.get(arg, arg) for arg in self.args]
         atom = Atom(self.predicate, args)
-        result.append(atom)
+        if atom in fluent_facts:
+            result.append(atom)
+        elif atom not in init_facts:
+            raise Impossible()
     def negate(self):
         return NegatedAtom(self.predicate, self.args)
     def positive(self):
@@ -277,10 +280,13 @@ class NegatedAtom(Literal):
     negated = True
     def _relaxed(self, parts):
         return Truth()
-    def instantiate(self, var_mapping, result):
+    def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         args = [var_mapping.get(arg, arg) for arg in self.args]
         atom = Atom(self.predicate, args)
-        result.append(NegatedAtom(self.predicate, args))
+        if atom in fluent_facts:
+            result.append(NegatedAtom(self.predicate, args))
+        elif atom in init_facts:
+            raise Impossible()
     def negate(self):
         return Atom(self.predicate, self.args)
     positive = negate

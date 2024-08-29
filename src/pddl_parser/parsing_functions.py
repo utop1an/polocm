@@ -1,6 +1,6 @@
 import sys
 
-from . import graph
+from translate import graph
 import pddl
 
 
@@ -292,22 +292,25 @@ def parse_axiom(alist, type_dict, predicate_dict):
                       len(predicate.arguments), condition)
 
 
-def parse_task(domain_pddl):
+def parse_task(domain_pddl, task_pddl):
     domain_name, domain_requirements, types, type_dict, constants, predicates, predicate_dict, functions, actions, axioms \
                  = parse_domain_pddl(domain_pddl)
+    task_name, task_domain_name, task_requirements, objects, init, goal, use_metric = parse_task_pddl(task_pddl, type_dict, predicate_dict)
 
+    assert domain_name == task_domain_name
     requirements = pddl.Requirements(sorted(set(
-                domain_requirements.requirements)))
-    objects = constants
+                domain_requirements.requirements +
+                task_requirements.requirements)))
+    objects = constants + objects
     check_for_duplicates(
         [o.name for o in objects],
         errmsg="error: duplicate object %r",
         finalmsg="please check :constants and :objects definitions")
-    init = [pddl.Atom("=", (obj.name, obj.name)) for obj in objects]
+    init += [pddl.Atom("=", (obj.name, obj.name)) for obj in objects]
 
     return pddl.Task(
-        domain_name, None, requirements, types, objects,
-        predicates, functions, init, None, actions, axioms, None)
+        domain_name, task_name, requirements, types, objects,
+        predicates, functions, init, goal, actions, axioms, use_metric)
 
 
 def parse_domain_pddl(domain_pddl):

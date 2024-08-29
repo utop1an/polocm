@@ -19,7 +19,7 @@ from tarski.io import fstrips as iofs
 import requests
 from .planning_domains_api import get_problem, get_plan
 from ..plan import Plan
-from ...trace import Action, State, PlanningObject, Fluent, Trace, Step
+from traces import Action, State, PlanningObject, Fluent, Trace, Step
 
 
 class PlanningDomainsAPIError(Exception):
@@ -401,12 +401,14 @@ class Generator:
                     "problem": open(self.pddl_prob, "r").read(),
                 }
 
+                print(data)
+
                 def get_api_response(delays: List[int]):
                     if delays:
                         sleep(delays[0])
                         try:
                             resp = requests.post(
-                                "http://solver.planning.domains/solve",
+                                "localhost:5001/package/lama-first/solve",
                                 verify=False,
                                 json=data,
                             ).json()
