@@ -6,18 +6,21 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from generate.pddl import VanillaSampling
 from utils import TraceSearchTimeOut
 
+alarm_time = 90
+sample_max_time = 60
+
 def handler(signum, frame):
     raise TimeoutError("Execution time exceeded")
 
 def generate_trace(domain, domain_name, problem_name, domain_file_path, problem_file_path):
     signal.signal(signal.SIGALRM, handler)
-    signal.alarm(40)
+    signal.alarm(alarm_time)
     try:
        
 
         print(f"Generating traces for: Domain: {domain_name}, Problem: {problem_name}")
 
-        vanilla = VanillaSampling(domain_file_path, problem_file_path, plan_len=50, num_traces=1)
+        vanilla = VanillaSampling(domain_file_path, problem_file_path, plan_len=50, num_traces=1, max_time=sample_max_time)
         traces = vanilla.generate_traces()
 
         output_data = []
@@ -54,7 +57,7 @@ def main():
     with open(os.path.join(out_dir, "vanilla.txt"), 'a') as file:
         # Prepare tasks for parallel processing
         tasks = []
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(max_workers=os.cpu_count()-2) as executor:
             # For each directory
             for directory in directories:
                 # Construct the path to the api.py file
