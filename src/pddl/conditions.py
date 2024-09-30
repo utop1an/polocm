@@ -267,10 +267,14 @@ class Atom(Literal):
     def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         args = [var_mapping.get(arg, arg) for arg in self.args]
         atom = Atom(self.predicate, args)
-        if atom in fluent_facts:
+        if fluent_facts==None:
             result.append(atom)
-        elif atom not in init_facts:
-            raise Impossible()
+        else:
+            if atom in fluent_facts:
+                result.append(atom)
+            elif atom not in init_facts:
+                raise Impossible()
+            
     def negate(self):
         return NegatedAtom(self.predicate, self.args)
     def positive(self):
@@ -283,10 +287,13 @@ class NegatedAtom(Literal):
     def instantiate(self, var_mapping, init_facts, fluent_facts, result):
         args = [var_mapping.get(arg, arg) for arg in self.args]
         atom = Atom(self.predicate, args)
-        if atom in fluent_facts:
+        if fluent_facts==None:
             result.append(NegatedAtom(self.predicate, args))
-        elif atom in init_facts:
-            raise Impossible()
+        else:
+            if atom in fluent_facts:
+                result.append(NegatedAtom(self.predicate, args))
+            elif atom in init_facts:
+                raise Impossible()
     def negate(self):
         return Atom(self.predicate, self.args)
     positive = negate

@@ -137,8 +137,10 @@ class VanillaSampling(Generator):
                             break
                         # pick a random applicable action and apply it
                         act = random.choice(app_act)
+                        print("act",act)
                         # create the trace and progress the state
                         macq_action = self.tarski_act_to_macq(act)
+                        print("macq action",macq_action)
                         macq_state = self.tarski_state_to_macq(state)
                         step = Step(macq_state, macq_action, j + 1)
                         trace.append(step)

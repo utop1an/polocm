@@ -5,6 +5,7 @@ from translate.normalize import normalize
 from utils import (
     set_timer_throw_exc,
     TraceSearchTimeOut,
+    TaskInitializationTimeOut
 )
 
 class RandomPlanner:
@@ -17,7 +18,9 @@ class RandomPlanner:
         self.seed = seed
         self.max_time = max_time
         self.task = None  # Task is initialized later to avoid non-pickleable issues
+        self.sas_task = None
 
+    @set_timer_throw_exc(num_seconds=30, exception=TaskInitializationTimeOut, max_time=30)
     def initialize_task(self):
         """Initialize the task from domain and problem files. This should be called in the worker process."""
         if self.seed:
@@ -25,16 +28,19 @@ class RandomPlanner:
         # Load and normalize the task only when needed
         task = open(self.domain, self.problem)
         normalize(task)
-        self.task = pddl_to_sas(task)
+        self.task = task
+        self.sas_task = pddl_to_sas(task)
 
     def generate_traces(self):
-        if self.task is None:
+        if self.sas_task is None:
             # Make sure the task is initialized in the worker process
             self.initialize_task()
 
         traces = []
         for _ in range(self.num_traces):
-            traces.append(self.generate_single_trace_setup())
+            trace = self.generate_single_trace_setup()
+            self.add_type_info(trace)
+            traces.append(trace)
         return traces
 
     def generate_single_trace_setup(self):
@@ -42,14 +48,14 @@ class RandomPlanner:
             num_seconds=self.max_time, exception=TraceSearchTimeOut, max_time=self.max_time
         )
         def generate_single_trace():
-            state = tuple(self.task.init.values)
-            valid = False
 
+            valid = False
             while not valid:
+                state = tuple(self.sas_task.init.values)
                 trace = []
                 for i in range(self.plan_len):
                     ops = self.get_applicable_operators(state)
-                    if not ops:  # Simplified empty check
+                    if not ops or len(ops) == 0:  # Simplified empty check
                         break
                     op = random.choice(ops)
                     trace.append(op)
@@ -64,8 +70,9 @@ class RandomPlanner:
     def get_applicable_operators(self, state):
         """Get all operators applicable in the current state."""
         ops = []
-        for op in self.task.operators:
-            applicable = all(state[var] == pre for var, pre, _, _ in op.pre_post if pre != -1)
+        for op in self.sas_task.operators:
+            conditions = op.get_applicability_conditions()
+            applicable = all(state[var] == val for var, val in conditions)
             if applicable:
                 ops.append(op)
         return ops
@@ -76,3 +83,20 @@ class RandomPlanner:
         for var, _, post, _ in op.pre_post:
             new_state[var] = post
         return tuple(new_state)
+    
+    def find_obj_type(self, obj):
+        for t in self.task.objects:
+            if obj == t.name:
+                return t.type_name
+        return "unknown"
+
+    def add_type_info(self, trace):
+        for op in trace:
+            o = op.name.strip("()").split(" ")
+            name = o[0]
+            args = o[1:]
+            args_with_type = []
+            for arg in args:
+                arg_type = self.find_obj_type(arg)
+                args_with_type.append(arg+"?"+arg_type)
+            op.name = "("+name+" "+" ".join(args_with_type) + ")"

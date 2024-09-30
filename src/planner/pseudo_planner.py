@@ -1,36 +1,113 @@
 
 import pddl_parser
 import translate.normalize as normalize
+import os
+from utils.common_errors import InvalidModel, InvalidActionSequence
 
 class PseudoPlanner:
-    def __init__(self, domain_filename) -> None:
-        self.domain =pddl_parser.open(domain_filename)
-        normalize.normalize(self.domain)
-        
+    def __init__(self, domain_filename, executability_type='overall') -> None:
+        self.domain_filename = domain_filename
+        try:
+            file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), domain_filename))
+            domain =pddl_parser.open(domain_filename)
+            normalize.normalize(domain)
+            self.domain = domain
+            self.executability_type = executability_type
+        except Exception as e:
+            raise InvalidModel(domain_filename, e)
+
     def check_executability(self,action_sequence, debug=False):
-        add_effs = set()
-        del_effs = set()
+        if (self.executability_type == 'overall'):
+            return self.get_overall_executability(action_sequence, debug)
+        elif (self.executability_type == 'first_fail'):
+            return self.get_first_fail_executability(action_sequence, debug)
+        else:
+            return self.get_overall_executability(action_sequence, debug)
+    
+    def get_overall_executability(self,action_sequence, debug=False):
+        if not self.domain:
+            raise InvalidModel(self.domain_filename)
+        if (len(action_sequence)==0):
+            raise InvalidActionSequence("Length 0")
+        true_effs = set()
+        # as we don't know the init states, we can only record the visited effects
+        # we assume unvisited effects are true since all given action seqs are valid
         visited = set()
+        error_count = 0
         for i, a in enumerate(action_sequence):
             action = self.domain.get_action(a.name)
-            assert action, f"Invalid action sequence with wrong action name: {a.name}!"
+            # if action not found, meaning it has not been learned properly, with no precond or effects
+            # we skip it, and add error count by 1
+            if not action:
+                error_count += 1
+                continue
 
             param_names = [p.name for p in action.parameters]
             param_types = [p.type_name for p in action.parameters]
             params = [obj.name for obj in a.obj_params]
             if ('sort0' in param_types):
                 index= param_types.index('sort0')
-                params.insert(index, '0')
+                params.insert(index, 'zero')
             var_mapping = dict(zip(param_names, params))
             objects_by_type = dict(zip(params, param_types))
-            op = action.instantiate(var_mapping, objects_by_type)
+            op = action.instantiate(var_mapping,None, None,None, objects_by_type,None)
 
             # check applicable
             preconditions = set(op.precondition)
-            invalid_add = preconditions.difference(add_effs)
-            invalid_add = invalid_add.intersection(visited)
-            invalid_del = preconditions.intersection(del_effs)
-            invalid = invalid_add.union(invalid_del)
+            invalid = preconditions.difference(true_effs)
+            invalid = invalid.intersection(visited)
+            # not applicable
+            if(len(invalid)>0):
+                error_count += 1
+                if debug:
+                    print(f"action {op} not executable")
+                    print("preconditions not satisfied: ", invalid)
+                    print("ending with executability: ", executability)
+            # apply action
+            adds = set(e for _,e in op.add_effects)
+            dels = set(e for _,e in op.del_effects)
+            
+            # mark visited effects
+            visited = visited.union(adds).union(dels);
+
+            true_effs = true_effs.union(adds)
+            true_effs.difference_update(dels)
+
+            if debug:
+                print(f"action {op} executed")
+                
+        return 1-error_count/len(action_sequence)
+        
+    def get_first_fail_executability(self,action_sequence, debug=False):
+        if not self.domain:
+            raise InvalidModel(self.domain_filename)
+        if (len(action_sequence)==0):
+            raise InvalidActionSequence("Length 0")
+        true_effs = set()
+
+        # as we don't know the init states, we can only record the visited effects
+        # we assume unvisited effects are true since all given action seqs are valid
+        visited = set()
+        for i, a in enumerate(action_sequence):
+            action = self.domain.get_action(a.name)
+            if not action:
+                raise InvalidModel(self.domain_filename)
+
+            param_names = [p.name for p in action.parameters]
+            param_types = [p.type_name for p in action.parameters]
+            params = [obj.name for obj in a.obj_params]
+            if ('sort0' in param_types):
+                index= param_types.index('sort0')
+                params.insert(index, 'zero')
+            var_mapping = dict(zip(param_names, params))
+            objects_by_type = dict(zip(params, param_types))
+            op = action.instantiate(var_mapping,None, None,None, objects_by_type,None)
+
+            # check applicable
+            preconditions = set(op.precondition)
+            invalid = preconditions.difference(true_effs)
+            invalid = invalid.intersection(visited)
+            # not applicable
             if(len(invalid)>0):
                 executability = i/len(action_sequence)
                 if debug:
@@ -39,16 +116,16 @@ class PseudoPlanner:
                     print("ending with executability: ", executability)
                 return executability
             # apply action
-            adds = set([e for _,e in op.add_effects])
-            dels = set([e for _,e in op.del_effects])
+            adds = set(e for _,e in op.add_effects)
+            dels = set(e for _,e in op.del_effects)
             
+            # mark visited effects
             visited = visited.union(adds).union(dels);
 
-            add_effs = add_effs.union(adds)
-            del_effs = del_effs.union(dels)
+            true_effs = true_effs.union(adds)
+            true_effs.difference_update(dels)
 
-            add_effs.difference_update(dels)
-            del_effs.difference_update(adds)
+          
             if debug:
                 print(f"action {op} executed")
         return 1

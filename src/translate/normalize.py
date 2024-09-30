@@ -155,7 +155,7 @@ def remove_universal_quantifiers(task):
     new_axioms_by_condition = {}
     for proxy in tuple(all_conditions(task)):
         # Cannot use generator because we add new axioms on the fly.
-        if proxy.condition.has_universal_part():
+        if proxy.condition and proxy.condition.has_universal_part():
             type_map = proxy.get_type_map()
             proxy.set(recurse(proxy.condition))
 
@@ -207,14 +207,14 @@ def build_DNF(task):
         return pddl.Disjunction(result_parts)
 
     for proxy in all_conditions(task):
-        if proxy.condition.has_disjunction():
+        if proxy.condition and proxy.condition.has_disjunction():
             proxy.set(recurse(proxy.condition).simplified())
 
 # [3] Split conditions at the outermost disjunction.
 def split_disjunctions(task):
     for proxy in tuple(all_conditions(task)):
         # Cannot use generator directly because we add/delete entries.
-        if isinstance(proxy.condition, pddl.Disjunction):
+        if proxy.condition and isinstance(proxy.condition, pddl.Disjunction):
             for part in proxy.condition.parts:
                 new_proxy = proxy.clone_owner()
                 new_proxy.set(part)
@@ -258,7 +258,7 @@ def move_existential_quantifiers(task):
         return pddl.ExistentialCondition(new_parameters, (new_conjunction,))
 
     for proxy in all_conditions(task):
-        if proxy.condition.has_existential_part():
+        if proxy.condition and proxy.condition.has_existential_part():
             proxy.set(recurse(proxy.condition).simplified())
 
 
@@ -310,6 +310,8 @@ def eliminate_existential_quantifiers_from_conditional_effects(task):
 
 def substitute_complicated_goal(task):
     goal = task.goal
+    if not goal:
+        return
     if isinstance(goal, pddl.Literal):
         return
     elif isinstance(goal, pddl.Conjunction):
@@ -343,13 +345,14 @@ def verify_axiom_predicates(task):
     for axiom in task.axioms:
         axiom_names.add(axiom.name)
 
-    for fact in task.init:
-        # Note that task.init can contain the assignment to (total-cost)
-        # in addition to regular atoms.
-        if getattr(fact, "predicate", None) in axiom_names:
-            raise SystemExit(
-                "error: derived predicate %r appears in :init fact '%s'" %
-                (fact.predicate, fact))
+    if task.init:
+        for fact in task.init:
+            # Note that task.init can contain the assignment to (total-cost)
+            # in addition to regular atoms.
+            if getattr(fact, "predicate", None) in axiom_names:
+                raise SystemExit(
+                    "error: derived predicate %r appears in :init fact '%s'" %
+                    (fact.predicate, fact))
 
     for action in task.actions:
         for effect in action.effects:

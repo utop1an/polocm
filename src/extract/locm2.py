@@ -8,7 +8,7 @@ from warnings import warn
 import networkx as nx
 
 from traces import Action, PlanningObject
-
+import time
 from utils.helpers import *
 
 from observation import ActionObservation, Observation, ObservedTraceList
@@ -41,7 +41,7 @@ class FSM:
     index: int
 
     def __repr__(self) -> str:
-        return f"FSM.{self.index} @ Sort.{self.sort}"
+        return f"S{self.sort}F{self.index}"
     
     def __hash__(self):
         return hash((self.sort, self.index))
@@ -156,7 +156,7 @@ class Hypothesis:
     def from_dict(
         hs: Dict[HSIndex, Set[HSItem]]
     ) -> Dict[FSM, Dict[int, Set["Hypothesis"]]]:
-        """Converts a dict of HSIndex -> HSItem to a dict of G -> S -> Hypothesis"""
+        """Converts a dict of HSIndex -> HSItem to a dict of FSM -> S -> Hypothesis"""
         HS: Dict[FSM, Dict[int, Set["Hypothesis"]]] = defaultdict(
             lambda: defaultdict(set)
         )
@@ -223,7 +223,6 @@ class LOCM2:
         else:
             debug = defaultdict(lambda: False)
 
-        obs_trace = obs_tracelist[0]
         fluents, actions = None, None
 
         sorts = LOCM2._get_sorts(obs_tracelist, debug=debug["get_sorts"])
@@ -231,165 +230,77 @@ class LOCM2:
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
 
-
+        start = time.time()
+        AML, obj_traces_overall, dependencies = LOCM2._locm2_step1(obs_tracelist, sorts, debug['2step0'])
+        AML_with_holes = LOCM2._locm2_step2(AML, debug['2step2'])
+        H_per_sort = LOCM2._locm2_step3(AML_with_holes, debug['3step3'])
+        transitions_per_sort = LOCM2._locm2_step4(AML_with_holes)
+        consecutive_transitions_per_sort = LOCM2._locm2_step5(AML_with_holes)
+        S = LOCM2._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
+        locm2_time = time.time() - start
         
-        TS, ap_state_pointers, OS = LOCM2._step1(obs_trace, sorts, debug["step1"])
-        HS = LOCM2._step3(TS, ap_state_pointers, OS, sorts, debug["step3"])
+        TS_overall, ap_state_pointers, OS = LOCM2._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
+        HS = LOCM2._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
         bindings = LOCM2._step4(HS, debug["step4"])
-        bindings = LOCM2._step5(HS, bindings, debug["step5"])
+        bindings = LOCM2._step5(HS, bindings,ap_state_pointers, OS, debug["step5"])
         fluents, actions = LOCM2._step7(
             OS,
             ap_state_pointers,
+            dependencies,
             sorts,
             bindings,
             statics if statics is not None else {},
             debug["step7"],
         )
-
+        locm_time = time.time() - start-locm2_time
         if viz:
             state_machines = LOCM2.get_state_machines(ap_state_pointers, OS, bindings)
             for sm in state_machines:
                 sm.render(view=view)
 
-        return Model(fluents, actions)
+        return Model(fluents, actions), (locm2_time, locm_time)
 
     @staticmethod
     def _get_sorts(obs_tracelist: ObservedTraceList, debug=False) -> Sorts:
-        sorts = []  # initialize list of sorts for this trace
-        # track actions seen in the trace, and the sort each actions params belong to
-        ap_sort_pointers: Dict[str, List[int]] = {}
-        # track objects seen in the trace, and the sort each belongs to
-        # obj_sort_pointers: Dict[str, int] = {}
-        sorted_objs = []
-
-        def get_obj_sort(obj: PlanningObject) -> int:
-            """Returns the sort index of the object"""
-            for i, sort in enumerate(sorts):
-                if obj in sort:
-                    return i
-            raise ValueError(f"Object {obj} not in any sort")
-        
+        s = defaultdict(set)
         for obs_trace in obs_tracelist:
             for obs in obs_trace:
                 action = obs.action
                 if action is None:
                     continue
-
-                if debug:
-                    print("\n\naction:", action.name, action.obj_params)
-
-                if action.name not in ap_sort_pointers:  # new action
-                    if debug:
-                        print("new action")
-
-                    ap_sort_pointers[action.name] = []
-
-                    # for each parameter of the action
-                    for obj in action.obj_params:
-                        if obj.name not in sorted_objs:  # unsorted object
-                            # append a sort (set) containing the object
-                            sorts.append({obj})
-
-                            # record the object has been sorted and the index of the sort it belongs to
-                            obj_sort = len(sorts) - 1
-                            sorted_objs.append(obj.name)
-                            ap_sort_pointers[action.name].append(obj_sort)
-
-                            if debug:
-                                print("new object", obj.name)
-                                print("sorts:", sorts)
-
-                        else:  # object already sorted
-                            # look up the sort of the object
-                            obj_sort = get_obj_sort(obj)
-                            ap_sort_pointers[action.name].append(obj_sort)
-
-                            if debug:
-                                print("sorted object", obj.name)
-                                print("sorts:", sorts)
-
-                    if debug:
-                        print("ap sorts:", ap_sort_pointers)
-
-                else:  # action seen before
-                    if debug:
-                        print("seen action")
-
-                    for ap_sort, obj in zip(
-                        ap_sort_pointers[action.name], action.obj_params
-                    ):
-                        if debug:
-                            print("checking obj", obj.name)
-                            print("ap sort:", ap_sort)
-
-                        if obj.name not in sorted_objs:  # unsorted object
-                            if debug:
-                                print("unsorted object", obj.name)
-                                print("sorts:", sorts)
-
-                            # add the object to the sort of current action parameter
-                            sorts[ap_sort].add(obj)
-                            sorted_objs.append(obj.name)
-
-                        else:  # object already has a sort
-                            # retrieve the sort the object belongs to
-                            obj_sort = get_obj_sort(obj)
-
-                            if debug:
-                                print(f"retrieving sorted obj {obj.name}")
-                                print(f"obj_sort_idx: {obj_sort}")
-                                print(f"seq_sorts: {sorts}")
-
-                            # check if the object's sort matches the action paremeter's
-                            # if so, do nothing and move on to next step
-                            # otherwise, unite the two sorts
-                            if obj_sort == ap_sort:
-                                if debug:
-                                    print("obj sort matches action")
-                            else:
-                                if debug:
-                                    print(
-                                        f"obj sort {obj_sort} doesn't match action {ap_sort}"
-                                    )
-                                    print(f"seq_sorts: {sorts}")
-
-                                # unite the action parameter's sort and the object's sort
-                                sorts[obj_sort] = sorts[obj_sort].union(sorts[ap_sort])
-
-                                # drop the not unionized sort
-                                sorts.pop(ap_sort)
-
-                                old_obj_sort = obj_sort
-
-                                obj_sort = get_obj_sort(obj)
-
-                                if debug:
-                                    print(
-                                        f"united seq_sorts[{ap_sort}] and seq_sorts[{obj_sort}]"
-                                    )
-                                    print(f"seq_sorts: {sorts}")
-                                    print(f"ap_sort_pointers: {ap_sort_pointers}")
-                                    print("updating pointers...")
-
-                                min_idx = min(ap_sort, obj_sort)
-
-                                # update all outdated records of which sort the affected objects belong to
-                                for action_name, ap_sorts in ap_sort_pointers.items():
-                                    for p, sort in enumerate(ap_sorts):
-                                        if sort == ap_sort or sort == old_obj_sort:
-                                            ap_sort_pointers[action_name][p] = obj_sort
-                                        elif sort > min_idx:
-                                            ap_sort_pointers[action_name][p] -= 1
-
-                                if debug:
-                                    print(f"ap_sort_pointers: {ap_sort_pointers}")
-            
+                for i,obj in enumerate(action.obj_params):
+                    s[action.name, i].add(obj.name)
+        
+        unique_sorts = list({frozenset(se) for se in s.values()})
+        sorts_copy = {i: sort for i, sort in enumerate(unique_sorts)}
+        # now do pairwise intersections of all values. If intersection, combine them; then return the final sets.
+        while True:
+            intersection_count = 0
+            for i in list(sorts_copy.keys()):
+                for j in list(sorts_copy.keys()):
+                    if i >= j:
+                        continue
+                    s1 = sorts_copy.get(i, None)
+                    if s1 is None:
+                        continue
+                    s2 = sorts_copy.get(j, None)
+                    if s2 is None:
+                        continue
+                    if s1.intersection(s2):
+                        intersection_count+=1
+                        sorts_copy[i] = s1.union(s2)
+                        del sorts_copy[j]
+            if intersection_count == 0:
+                break
+        # add zero class
         obj_sorts = {}
-        for i, sort in enumerate(sorts):
+        for i, sort in enumerate(sorts_copy.values()):
             for obj in sort:
                 # NOTE: object sorts are 1-indexed so the zero-object can be sort 0
-                obj_sorts[obj.name] = i + 1
+                obj_sorts[obj] = i + 1
+        obj_sorts['zero'] = 0
 
+     
         return obj_sorts
 
     @staticmethod
@@ -419,11 +330,10 @@ class LOCM2:
         """
         # create the zero-object for zero analysis (step 2)
         zero_obj = LOCM2.zero_obj
-
         graphs = []
-        for sort in range(len(set(sorts.values()))+1):
+        for sort in range(len(set(sorts.values()))):
             graphs.append(nx.DiGraph())
-        
+        dependencies = defaultdict(set)
         # obj_traces for all obs_traces in obs_tracelist, indexed by trace_no
         obj_traces_overall = []
         for obs_trace in obs_tracelist:
@@ -439,10 +349,17 @@ class LOCM2:
                     # for each combination of action name A and argument pos P
                     for j, obj in enumerate(action.obj_params):
                         # create transition A.P
-                        ap = AP(action, pos=j + 1, sort=sorts[obj.name])
-                        obj_traces[obj].append(ap)
-                        
-                        graphs[sorts[obj.name]].add_node(ap)
+                        sort = sorts[obj.name]
+                        ap = AP(action, pos=j + 1, sort=sort)
+                        if len(obj_traces[obj]) > 0:
+                            candidate_duplicate_action = obj_traces[obj][-1]
+                        else:
+                            candidate_duplicate_action = None
+                        if candidate_duplicate_action and candidate_duplicate_action.action == action:
+                            dependencies[candidate_duplicate_action.action.name].add(ap)
+                        else:
+                            obj_traces[obj].append(ap)
+                            graphs[sort].add_node(ap)
             obj_traces_overall.append(obj_traces)
         
         # adjacent matrix list for all sorts
@@ -464,7 +381,7 @@ class LOCM2:
             if debug:
                 print("Sort.{} AML:".format(index))
                 print_table(df)
-        return AML, obj_traces_overall
+        return AML, obj_traces_overall, dependencies
 
 
     @staticmethod
@@ -500,9 +417,9 @@ class LOCM2:
                     if common_values_flag:
                         for col in range(row1.shape[0]):
                             if row1.iloc[col] > 0 and row2.iloc[col] == 0:
-                                df1.iloc[idx2,col] = 'hole'
+                                df1.iloc[idx2,col] = -1
                             elif row1.iloc[col] == 0 and row2.iloc[col] > 0:
-                                df1.iloc[idx1, col] = 'hole'
+                                df1.iloc[idx1, col] = -1
             if debug:
                 print("Sort.{} AML with holes:".format(index))
                 print_table(df1)
@@ -526,7 +443,7 @@ class LOCM2:
             holes = set()
             for i in range(df.shape[0]):
                 for j in range(df.shape[1]):
-                    if df.iloc[i,j] == 'hole':
+                    if df.iloc[i,j] == -1:
                         holes.add(frozenset({df.index[i] , df.columns[j]}))
             H_per_sort.append(holes)
             if debug:
@@ -558,9 +475,8 @@ class LOCM2:
             consecutive_transitions = set()  # for a class
             for i in range(df.shape[0]):
                 for j in range(df.shape[1]):
-                    if df.iloc[i, j] != 'hole':
+                    if df.iloc[i, j] != -1:
                         if df.iloc[i, j] > 0:
-    #                         print("(" + df.index[i] + "," + df.columns[j] + ")")
                             consecutive_transitions.add((df.index[i], df.columns[j]))
             consecutive_transitions_per_sort.append(consecutive_transitions)
         return consecutive_transitions_per_sort
@@ -570,7 +486,8 @@ class LOCM2:
         AML,
         H_per_sort,
         transitions_per_sort,
-        consecutive_transitions_per_sort
+        consecutive_transitions_per_sort,
+        debug=False
     ):
         """
         build transition sets per sort
@@ -582,24 +499,15 @@ class LOCM2:
 
         # for each hole for a class/sort
         for index, holes in enumerate(H_per_sort):
-            
-            printmd("### Sort.{}".format(index+1))
-            
             # S
             transition_set_list = [] #transition_sets_of_a_class, # intially it's empty
             
-            if len(holes)==0:
-                print("no holes") # S will contain just T_all
-            
             if len(holes) > 0: # if there are any holes for a class
-                print(str(len(holes)) + " holes")
                 for ind, hole in enumerate(holes):
-                    printmd("#### Hole " + str(ind + 1) + ": " + str(set(hole)))
                     is_hole_already_covered_flag = False
                     if len(transition_set_list)>0:
                         for s_prime in transition_set_list:
                             if hole.issubset(s_prime):
-                                printmd("Hole "+ str(set(hole)) + " is already covered.")
                                 is_hole_already_covered_flag = True
                                 break
                         
@@ -619,58 +527,45 @@ class LOCM2:
                             s_well_formed_and_valid = False
                             for s in candidate_sets:
                                 if len(s)>=i:
-                                    printmd("Checking candidate set *" + str(s) + "* of **Sort.{}** for well formedness and Validity".format(index+1))
                                     subset_df = AML[index].loc[list(s),list(s)]
-                                    print_table(subset_df)
 
                                     # checking for well-formedness
                                     well_formed_flag = False
                                     well_formed_flag = check_well_formed(subset_df)
-                                    if not well_formed_flag:
-                                        print("This subset is NOT well-formed")
-                                        
-                                    elif well_formed_flag:
-                                        print("This subset is well-formed.")
+                                       
+                                    if well_formed_flag:
                                         # if well-formed validate across the data E
                                         # to remove inappropriate dead-ends
                                         valid_against_data_flag = False
                                         valid_against_data_flag = check_valid(subset_df, consecutive_transitions_per_sort)
-                                        if not valid_against_data_flag:
-                                            print("This subset is well-formed but invalid against example data")
-
                                         if valid_against_data_flag:
-                                            print("This subset is valid.")
-                                            print("Adding this subset " + str(s) +" to the locm2 transition set.")
                                             if s not in transition_set_list: # do not allow copies.
                                                 transition_set_list.append(s)
                                             
-                                            print("Hole that is covered now:")
-                                            print(list(h))
                                             s_well_formed_and_valid = True
                                             break 
                             if s_well_formed_and_valid:
-                                    break
+                                break
                                             
-                                            
-
-            print(transition_set_list)                                    
             #step 7 : remove redundant sets S - {s1}
             ts_copy = transition_set_list.copy()
             for i in range(len(ts_copy)):
                 for j in range(len(ts_copy)):
+                    if i == j:
+                        continue
                     if ts_copy[i] < ts_copy[j]: #if subset
                         if ts_copy[i] in transition_set_list:
                             transition_set_list.remove(ts_copy[i])
                     elif ts_copy[i] > ts_copy[j]:
                         if ts_copy[j] in transition_set_list:
                             transition_set_list.remove(ts_copy[j])
-            print("\nRemoved redundancy transition set list")
-            print(transition_set_list)
+         
 
             #step-8: include all-transitions machine, even if it is not well-formed.
             transition_set_list.append(set(transitions_per_sort[index])) #fallback
-            printmd("#### Final transition set list")
-            print(transition_set_list)
+            if debug:
+                printmd("#### Final transition set list")
+                print(transition_set_list)
             transition_sets_per_sort.append(transition_set_list)
             
 
@@ -708,15 +603,7 @@ class LOCM2:
                             TS[fsm][obj] = subseq
                 else:
                     TS[zero_fsm][zero_obj] = seq
-                    # state_n = 1
-                    # for ap in seq:
-                    #     if ap not in ap_state_pointers[zero_fsm]:
-                    #         ap_state_pointers[zero_fsm][ap] = StatePointers(state_n, state_n+1)
-
-                    #         OS[zero_fsm].append({state_n})
-                    #         OS[zero_fsm].append({state_n + 1})
-
-                    #         state_n+=2
+                 
 
             TS_overall.append(dict(TS))
         if debug:
@@ -754,8 +641,8 @@ class LOCM2:
                 fsm_ts = AML[fsm.sort].loc[list(ts), list(ts)]
                 prev_aps = fsm_ts[ap]
                 for prev_ap, val in prev_aps.items():
-                    current_start, _ = LOCM2._pointer_to_set(OS[fsm], state.start, state.end)
                     if val > 0:
+                        current_start, _ = LOCM2._pointer_to_set(OS[fsm], state.start, state.end)
                         prev_state = ap_state_pointers[fsm][prev_ap]
                         _, prev_end = LOCM2._pointer_to_set(OS[fsm], prev_state.start, prev_state.end)
                         if (current_start != prev_end):
@@ -818,7 +705,7 @@ class LOCM2:
                         if len(B.action.obj_params) == 1 or len(C.action.obj_params) == 1:
                             continue
                         # skip if B and C are not consistent
-                        if AML[fsm.sort].loc[B,C]==0:
+                        if AML[G].loc[B,C]==0:
                             continue
                         k = B.pos
                         l = C.pos
@@ -886,8 +773,8 @@ class LOCM2:
         for hind, hs in HS.copy().items():
             for h in hs:
                 if not h.supported:
-                    hs.remove(h)
-            if len(hs) == 0:
+                    HS[hind].remove(h)
+            if len(HS[hind]) == 0:
                 del HS[hind]
 
         # Converts HS {HSIndex: HSItem} to a mapping of hypothesis for states of a sort {sort: {state: Hypothesis}}
@@ -934,9 +821,9 @@ class LOCM2:
                     for h2 in hs_fsm_state[i + 1 :]:
                         # check if hypothesis parameters (v1 & v2) need to be unified
                         if (
-                            (h1.B == h2.B and h1.k == h2.k and h1.k_ == h2.k_)
+                            (h1.B.action == h2.B.action and h1.k == h2.k and h1.k_ == h2.k_)
                             or
-                            (h1.C == h2.C and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
+                            (h1.C.action == h2.C.action and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
                         ):
                             v1 = state_bindings[h1]
                             v2 = state_bindings[h2]
@@ -966,32 +853,55 @@ class LOCM2:
     def _step5(
         HS: Dict[FSM, Dict[int, Set[Hypothesis]]],
         bindings: Bindings,
+        ap_state_pointers: APStatePointers,
+        OS: OSType,
         debug: bool = False,
     ) -> Bindings:
         """Step 5: Removing parameter flaws"""
 
         # check each bindings[G][S] -> (h, P)
         for fsm, hs_fsm in HS.items():
-            for state in hs_fsm:
+            for state, hs in hs_fsm.items():
                 # track all the h.Bs that occur in bindings[G][S]
-                all_hB = set()
+                pointers = OS[fsm][state]
+                inaps = set(ap for ap, (start, end) in ap_state_pointers[fsm].items() if end in pointers)
+                outaps = set(ap for ap, (start, end) in ap_state_pointers[fsm].items() if start in pointers)        
                 # track the set of h.B that set parameter P
                 sets_P = defaultdict(set)
+                all_P = set()
                 for h, P in bindings[fsm][state]:
-                    sets_P[P].add(h.B)
-                    all_hB.add(h.B)
-
+                    sets_P[P].add(h)
+                    all_P.add(h.B)     
                 # for each P, check if there is a transition h.B that never sets parameter P
                 # i.e. if sets_P[P] != all_hB
                 for P, setby in sets_P.items():
-                    if not setby == all_hB:  # P is a flawed parameter
+                    flag = True
+                    for ap in inaps:
+                        candidate_hs = {h for h in hs if h.B == ap}
+                    
+                        if len(candidate_hs) == 0:
+                            flag = False
+                            break
+                        if len(candidate_hs.intersection(setby))==0:
+                            flag = False
+                            break
+                    if flag:
+                        for ap in outaps:
+                            candidate_hs = {h for h in hs if h.C == ap}
+                            if len(candidate_hs) == 0:
+                                flag = False
+                                break
+                            if len(candidate_hs.intersection(setby))==0:
+                                flag = False
+                                break
+                    if not flag:  # P is a flawed parameter
                         # remove all bindings referencing P
                         for h, P_ in bindings[fsm][state].copy():
                             if P_ == P:
+                                
                                 bindings[fsm][state].remove(Binding(h, P_))
                         if len(bindings[fsm][state]) == 0:
                             del bindings[fsm][state]
-
         for k, v in bindings.copy().items():
             if not v:
                 del bindings[k]
@@ -1039,6 +949,7 @@ class LOCM2:
     def _step7(
         OS: OSType,
         ap_state_pointers: APStatePointers,
+        dependencies,
         sorts: Sorts,
         bindings: Bindings,
         statics: Statics,
@@ -1063,16 +974,21 @@ class LOCM2:
             pprint(bindings)
             print()
 
-        bound_param_sorts = {
-            fsm: {
-                state: [
-                    binding.hypothesis.G_
-                    for binding in bindings.get(fsm, {}).get(state, [])
-                ]
-                for state in range(len(states))
-            }
-            for fsm, states in OS.items()
-        }
+        bound_param_sorts= defaultdict(dict)
+        for fsm, states in OS.items():
+            bound_param_sorts[fsm] = defaultdict(list)
+            for state in range(len(states)):
+                added_P = []
+                bs = bindings.get(fsm, {}).get(state, [])
+                if len(bs) > 0:
+                    bs.sort(key=lambda b: b.param)
+                    for binding in bs:
+                        if binding.param not in added_P:
+                            added_P.append(binding.param)
+                            bound_param_sorts[fsm][state].append(binding.hypothesis.G_)
+                else:
+                    bound_param_sorts[fsm][state] = []
+     
 
         actions = {}
         fluents = defaultdict(dict)
@@ -1082,7 +998,9 @@ class LOCM2:
             for ap in aps:
                 all_aps[ap.action.name].add(ap)
         for action, aps in all_aps.items():
-            param_sorts = [ap for ap in aps]
+            param_sorts = set(ap for ap in aps)
+            deps = dependencies.get(action, set())
+            param_sorts= list(param_sorts.union(deps))
             param_sorts.sort(key=lambda ap: ap.pos)
             actions[action] = LearnedLiftedAction(
                 action, [f"sort{s.sort}" for s in param_sorts]
@@ -1099,7 +1017,7 @@ class LOCM2:
         for fsm, state_bindings in bound_param_sorts.items():
             for state, bound_sorts in state_bindings.items():
                 fluents[fsm][state] = TemplateFluent(
-                    f"fsm{fsm}_state{state}",
+                    f"{fsm}state{state}",
                     [f"sort{fsm.sort}"]+[f"sort{s}" for s in bound_sorts],
                 )
 
@@ -1116,10 +1034,15 @@ class LOCM2:
 
                 # for each bindings on the start state (if there are any)
                 # then add each binding.hypothesis.l_
-                if fsm in bindings and start_state in bindings[fsm]:
-                    bound_param_inds = [
-                        b.hypothesis.l_- shift  for b in bindings[fsm][start_state]
-                    ]
+                bs = bindings.get(fsm, {}).get(start_state, [])
+                added_P = []
+                if len(bs) > 0:
+                    bs.sort(key=lambda b: b.param)
+                    for h, P in bs:
+                        if P not in added_P and h.l==ap.pos:
+                            bound_param_inds.append(h.l_ - shift)
+                            added_P.append(P)
+
 
                 start_fluent = LearnedLiftedFluent(
                     start_fluent_temp.name,
@@ -1136,10 +1059,14 @@ class LOCM2:
                     # add += fluent for destination state
                     end_fluent_temp = fluents[fsm][end_state]
                     bound_param_inds = []
-                    if fsm in bindings and end_state in bindings[fsm]:
-                        bound_param_inds = [
-                            b.hypothesis.l_ -shift  for b in bindings[fsm][end_state]
-                        ]
+                    bs = bindings.get(fsm, {}).get(end_state, [])
+                    added_P = []
+                    if len(bs) > 0:
+                        bs.sort(key=lambda b: b.param)
+                        for h, P in bs:
+                            if P not in added_P and  h.k == ap.pos:
+                                bound_param_inds.append(h.k_ - shift)
+                                added_P.append(P)
                     end_fluent = LearnedLiftedFluent(
                         end_fluent_temp.name,
                         end_fluent_temp.param_sorts,

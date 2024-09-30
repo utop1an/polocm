@@ -10,13 +10,18 @@ import pulp as pl
 from tabulate import tabulate
 import numpy as np
 import time
-import signal
 
 from traces import Action, PlanningObject
 
 from utils.helpers import *
 
-from observation import PartialOrderedActionObservation, Observation, ObservedTraceList
+from utils import (
+    set_timer_throw_exc,
+    POLOCMTimeOut,
+    InvalidMLPTask,
+)
+
+from observation import PartialOrderedActionObservation, Observation, ObservedTraceList, ActionObservation
 from .learned_action import LearnedLiftedAction
 from .model import Model
 from .exceptions import IncompatibleObservationToken
@@ -32,6 +37,9 @@ class AP:
     sort: int
 
     def __repr__(self) -> str:
+        return f"{self.action.name}_{self.pos}"
+
+    def __str__(self) -> str:
         return f"{self.action.name}.{self.pos}"
 
     def __hash__(self):
@@ -50,7 +58,11 @@ class IAP:
     sort: int
 
     def __repr__(self) -> str:
-        ending = f".{self.pos}" if self.pos else ""
+        ending = f"_{self.pos}" if self.pos is not None else ""
+        return f"{self.ind}_{self.action.name}{ending}"
+
+    def __str__(self) -> str:
+        ending = f".{self.pos}" if self.pos is not None else ""
         return f"[{self.ind}]{self.action.name}{ending}"
 
     def __hash__(self):
@@ -102,7 +114,7 @@ class FSM:
     index: int
 
     def __repr__(self) -> str:
-        return f"F{self.index}S{self.sort}"
+        return f"S{self.sort}F{self.index}"
     
     def __hash__(self):
         return hash((self.sort, self.index))
@@ -238,9 +250,6 @@ Bindings = Dict[FSM, Dict[int, List[Binding]]]  # {FSM: {state: [Binding]}}
 
 Statics = Dict[str, List[str]]  # {action: [static preconditions]}
 
-def handler(signum, frame):
-    raise TimeoutError("Execution time exceeded")
-
 class POLOCM:
     """LOCM"""
 
@@ -249,10 +258,13 @@ class POLOCM:
     def __new__(
         cls,
         obs_tracelist: ObservedTraceList,
+        sorts = None,
         statics: Optional[Statics] = None,
         viz: bool = False,
         view: bool = False,
-        time_limit= None,
+        time_limit= (None, None, None),
+        prob_type = 'polocm',
+        solver_type = 'cbc',
         debug: Union[bool, Dict[str, bool], List[str]] = False,
     ):
         """Creates a new Model object.
@@ -275,9 +287,11 @@ class POLOCM:
             IncompatibleObservationToken:
                 Raised if the observations are not identity observation.
         """
-        if obs_tracelist.type is not PartialOrderedActionObservation:
+        if prob_type == "polocm" and obs_tracelist.type is not PartialOrderedActionObservation:
             raise IncompatibleObservationToken(obs_tracelist.type, POLOCM)
-
+        if prob_type == "locm2" and obs_tracelist.type is not ActionObservation:
+            raise IncompatibleObservationToken(obs_tracelist.type, LOCM2)
+        
         if isinstance(debug, bool) and debug:
             debug = defaultdict(lambda: True)
         elif isinstance(debug, dict):
@@ -287,201 +301,182 @@ class POLOCM:
         else:
             debug = defaultdict(lambda: False)
 
+        if (len(time_limit)!=3):
+            raise Exception(message="Invalid Time Limit")
         fluents, actions = None, None
 
-        sorts = POLOCM._get_sorts(obs_tracelist, debug=debug["get_sorts"])
+        if (sorts is None):
+            sorts = POLOCM._get_sorts(obs_tracelist, debug["sorts"])
 
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
-
-        if time_limit:
-            signal.signal(signal.SIGALRM, handler)
-            signal.alarm(time_limit)
-
         
-        try:
-            start = time.time()
-            obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
+        if solver_type == 'gurobi':
+            solver = pl.GUROBI_CMD(msg=False, timeLimit=600)
+        else:
+            solver = pl.PULP_CBC_CMD(msg=False, timeLimit=600)
+        
+        if prob_type == 'polocm':
+            return POLOCM.polocm(sorts, obs_tracelist, time_limit, solver, debug)
+        elif prob_type == 'locm2':
+            return POLOCM.locm2(sorts, obs_tracelist, time_limit, debug)
+        else:
+            return None
+
+    @staticmethod
+    def polocm(sorts, obs_tracelist, time_limit, solver, debug):
+        
+        @set_timer_throw_exc(num_seconds=time_limit[0], exception=POLOCMTimeOut, max_time=time_limit[0], stage='polocm')
+        def _polocm():
+            obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
             prob, PO_vars_overall, PO_matrix_with_vars = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall,'trace', debug['pstep2'])
             prob, FO_vars_overall, FO_matrix_with_vars, varname_lookup = POLOCM.polocm_step3(prob,PO_vars_overall, PO_matrix_with_vars, obj_trace_FO_matrix_overall, debug['pstep3'])
             prob, sort_transition_matrix, sort_AP_vars, varname_lookup = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, FO_matrix_with_vars,varname_lookup, debug['pstep4'])
-            solver = pl.PULP_CBC_CMD(msg=False)
-            solution = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
-            FO, AP, obj_traces_overall = POLOCM.polocm_step6(PO_matrix_with_vars, PO_vars_overall,FO_matrix_with_vars, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
-            polocm_time = time.time() - start
-        except TimeoutError as e:
-            print(e)
-            return None, None, None
-        finally:
-            signal.alarm(0)
+            solution, num_vars, num_constraints = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
+            FO, APs, obj_traces_overall = POLOCM.polocm_step6(PO_matrix_with_vars, PO_vars_overall,FO_matrix_with_vars, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
+            return obj_traces_overall, APs, dependencies, (num_vars, num_constraints)
         
+        @set_timer_throw_exc(num_seconds=time_limit[1], exception=POLOCMTimeOut, max_time=time_limit[1], stage='locm2')
+        def _locm2(obj_traces_overall):
+            AML = POLOCM._locm2_step0(obj_traces_overall, sorts, debug['2step0'])
+            AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
+            H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['3step3'])
+            transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
+            consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
+            S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
+            return AML, S
+        
+        @set_timer_throw_exc(num_seconds=time_limit[2], exception=POLOCMTimeOut, max_time=time_limit[2], stage='locm')
+        def _locm(obj_traces_overall, S, AML, dependencies):
+            TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
+            HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
+            bindings = POLOCM._step4(HS, debug["step4"])
+            bindings = POLOCM._step5(HS, bindings,ap_state_pointers, OS, debug["step5"])
+            fluents, actions = POLOCM._step7(
+                OS,
+                ap_state_pointers,
+                dependencies,
+                sorts,
+                bindings,
+                {},  # statics
+                debug["step7"],
+            )
+            return fluents, actions, OS, ap_state_pointers, bindings
+        
+        try:
+            start = time.time()
+            obj_traces_overall, APs, dependencies, mlp_info = _polocm()
+            polocm_time = time.time() - start
+            print("MLP done...")
+            AML, S = _locm2(obj_traces_overall)
+            locm2_time = time.time() - start - polocm_time
+            fluents, actions, OS, ap_state_pointers, bindings = _locm(obj_traces_overall, S, AML, dependencies)
+            locm_time = time.time() - start - polocm_time - locm2_time
+            model = Model(fluents, actions)
+        except IndexError as ie:
+            print("INDEX ERROR during polocm")
+            raise ie
+        except Exception as e:
+            raise e
+        
+      
+        return model, APs, (polocm_time, locm2_time, locm_time), mlp_info
+    
+    @staticmethod
+    def locm2(sorts, obs_tracelist, time_limit, debug):
+        @set_timer_throw_exc(num_seconds=time_limit[1], exception=POLOCMTimeOut, max_time=time_limit[1], stage='locm2')
+        def _locm2():
+            start = time.time()
+            AML, obj_traces_overall, dependencies = POLOCM._locm2_step1(obs_tracelist, sorts, debug['2step0'])
+            step1_time = time.time() - start
+            print("Step 1 done in ", step1_time)
+            AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
+            step2_time = time.time() - start - step1_time
+            print("Step 2 done in ", step2_time)
+            H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['2step3'])
+            step3_time = time.time() - start - step1_time - step2_time
+            print("Step 3 done in ", step3_time)
+            transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
+            step4_time = time.time() - start - step1_time - step2_time - step3_time
+            print("Step 4 done in ", step4_time)
+            consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
+            step5_time = time.time() - start - step1_time - step2_time - step3_time - step4_time
+            print("Step 5 done in ", step5_time)
+            S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
+            step6_time = time.time() - start - step1_time - step2_time - step3_time - step4_time - step5_time
+            print("Step 6 done in ", step6_time)
+            return AML, S, obj_traces_overall, dependencies
+        
+        @set_timer_throw_exc(num_seconds=time_limit[2], exception=POLOCMTimeOut, max_time=time_limit[2], stage='locm')
+        def _locm(obj_traces_overall, S, AML, dependencies):
+            TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
+            HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
+            bindings = POLOCM._step4(HS, debug["step4"])
+            bindings = POLOCM._step5(HS, bindings,ap_state_pointers, OS, debug["step5"])
+            fluents, actions = POLOCM._step7(
+                OS,
+                ap_state_pointers,
+                dependencies,
+                sorts,
+                bindings,
+                {},
+                debug["step7"],
+            )
+            return fluents, actions
 
-        AML = POLOCM._locm2_step0(obj_traces_overall, sorts, debug['2step0'])
-        AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
-        H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['3step3'])
-        transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
-        consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
-        S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
-        locm2_time = time.time() - start - polocm_time
-
-        TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
-        HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
-        bindings = POLOCM._step4(HS, debug["step4"])
-        bindings = POLOCM._step5(HS, bindings,ap_state_pointers, OS, debug["step5"])
-        fluents, actions = POLOCM._step7(
-            OS,
-            ap_state_pointers,
-            sorts,
-            bindings,
-            statics if statics is not None else {},
-            debug["step7"],
-        )
-        locm_time = time.time() - start - polocm_time - locm2_time
-
-        if viz:
-            state_machines = POLOCM.get_state_machines(ap_state_pointers, OS, bindings)
-            for sm in state_machines:
-                sm.render(view=view)
-
-        return Model(fluents, actions), AP, (polocm_time, locm2_time, locm_time)
-
+        try:
+            start = time.time()
+            AML, S, obj_traces_overall, dependencies = _locm2()
+            locm2_time = time.time() - start
+            fluents, actions = _locm(obj_traces_overall, S, AML, dependencies)
+            locm_time = time.time() - start - locm2_time
+            model = Model(fluents, actions)
+        except Exception as e:
+            raise e
+    
+        return Model(fluents, actions), (0, locm2_time, locm_time)
+        
     @staticmethod
     def _get_sorts(obs_tracelist: ObservedTraceList, debug=False) -> Sorts:
-        sorts = []  # initialize list of sorts for this trace
-        # track actions seen in the trace, and the sort each actions params belong to
-        ap_sort_pointers: Dict[str, List[int]] = {}
-        # track objects seen in the trace, and the sort each belongs to
-        # obj_sort_pointers: Dict[str, int] = {}
-        sorted_objs = []
-
-        def get_obj_sort(obj: PlanningObject) -> int:
-            """Returns the sort index of the object"""
-            for i, sort in enumerate(sorts):
-                if obj in sort:
-                    return i
-            raise ValueError(f"Object {obj} not in any sort")
-        
+        s = defaultdict(set)
         for obs_trace in obs_tracelist:
             for obs in obs_trace:
                 action = obs.action
                 if action is None:
                     continue
-
-                if debug:
-                    print("\n\naction:", action.name, action.obj_params)
-
-                if action.name not in ap_sort_pointers:  # new action
-                    if debug:
-                        print("new action")
-
-                    ap_sort_pointers[action.name] = []
-
-                    # for each parameter of the action
-                    for obj in action.obj_params:
-                        if obj.name not in sorted_objs:  # unsorted object
-                            # append a sort (set) containing the object
-                            sorts.append({obj})
-
-                            # record the object has been sorted and the index of the sort it belongs to
-                            obj_sort = len(sorts) - 1
-                            sorted_objs.append(obj.name)
-                            ap_sort_pointers[action.name].append(obj_sort)
-
-                            if debug:
-                                print("new object", obj.name)
-                                print("sorts:", sorts)
-
-                        else:  # object already sorted
-                            # look up the sort of the object
-                            obj_sort = get_obj_sort(obj)
-                            ap_sort_pointers[action.name].append(obj_sort)
-
-                            if debug:
-                                print("sorted object", obj.name)
-                                print("sorts:", sorts)
-
-                    if debug:
-                        print("ap sorts:", ap_sort_pointers)
-
-                else:  # action seen before
-                    if debug:
-                        print("seen action")
-
-                    for ap_sort, obj in zip(
-                        ap_sort_pointers[action.name], action.obj_params
-                    ):
-                        if debug:
-                            print("checking obj", obj.name)
-                            print("ap sort:", ap_sort)
-
-                        if obj.name not in sorted_objs:  # unsorted object
-                            if debug:
-                                print("unsorted object", obj.name)
-                                print("sorts:", sorts)
-
-                            # add the object to the sort of current action parameter
-                            sorts[ap_sort].add(obj)
-                            sorted_objs.append(obj.name)
-
-                        else:  # object already has a sort
-                            # retrieve the sort the object belongs to
-                            obj_sort = get_obj_sort(obj)
-
-                            if debug:
-                                print(f"retrieving sorted obj {obj.name}")
-                                print(f"obj_sort_idx: {obj_sort}")
-                                print(f"seq_sorts: {sorts}")
-
-                            # check if the object's sort matches the action paremeter's
-                            # if so, do nothing and move on to next step
-                            # otherwise, unite the two sorts
-                            if obj_sort == ap_sort:
-                                if debug:
-                                    print("obj sort matches action")
-                            else:
-                                if debug:
-                                    print(
-                                        f"obj sort {obj_sort} doesn't match action {ap_sort}"
-                                    )
-                                    print(f"seq_sorts: {sorts}")
-
-                                # unite the action parameter's sort and the object's sort
-                                sorts[obj_sort] = sorts[obj_sort].union(sorts[ap_sort])
-
-                                # drop the not unionized sort
-                                sorts.pop(ap_sort)
-
-                                old_obj_sort = obj_sort
-
-                                obj_sort = get_obj_sort(obj)
-
-                                if debug:
-                                    print(
-                                        f"united seq_sorts[{ap_sort}] and seq_sorts[{obj_sort}]"
-                                    )
-                                    print(f"seq_sorts: {sorts}")
-                                    print(f"ap_sort_pointers: {ap_sort_pointers}")
-                                    print("updating pointers...")
-
-                                min_idx = min(ap_sort, obj_sort)
-
-                                # update all outdated records of which sort the affected objects belong to
-                                for action_name, ap_sorts in ap_sort_pointers.items():
-                                    for p, sort in enumerate(ap_sorts):
-                                        if sort == ap_sort or sort == old_obj_sort:
-                                            ap_sort_pointers[action_name][p] = obj_sort
-                                        elif sort > min_idx:
-                                            ap_sort_pointers[action_name][p] -= 1
-
-                                if debug:
-                                    print(f"ap_sort_pointers: {ap_sort_pointers}")
-            
+                for i,obj in enumerate(action.obj_params):
+                    s[action.name, i].add(obj.name)
+        
+        unique_sorts = list({frozenset(se) for se in s.values()})
+        sorts_copy = {i: sort for i, sort in enumerate(unique_sorts)}
+        # now do pairwise intersections of all values. If intersection, combine them; then return the final sets.
+        while True:
+            intersection_count = 0
+            for i in list(sorts_copy.keys()):
+                for j in list(sorts_copy.keys()):
+                    if i >= j:
+                        continue
+                    s1 = sorts_copy.get(i, None)
+                    if s1 is None:
+                        continue
+                    s2 = sorts_copy.get(j, None)
+                    if s2 is None:
+                        continue
+                    if s1.intersection(s2):
+                        intersection_count+=1
+                        sorts_copy[i] = s1.union(s2)
+                        del sorts_copy[j]
+            if intersection_count == 0:
+                break
+        # add zero class
         obj_sorts = {}
-        for i, sort in enumerate(sorts):
+        for i, sort in enumerate(sorts_copy.values()):
             for obj in sort:
                 # NOTE: object sorts are 1-indexed so the zero-object can be sort 0
-                obj_sorts[obj.name] = i + 1
+                obj_sorts[obj] = i + 1
         obj_sorts['zero'] = 0
+
+     
         return obj_sorts
 
     @staticmethod
@@ -519,6 +514,7 @@ class POLOCM:
         # obj_traces for all obs_traces in obs_tracelist, indexed by trace_no
         obj_PO_trace_overall = []
         trace_PO_matrix_overall = []
+        dependencies = defaultdict(set)
         for obs_PO_trace in obs_PO_tracelist:
             indexed_actions = [IAP(obs.action, obs.index, None, None) for obs in obs_PO_trace]
             traces_PO_matrix = pd.DataFrame(columns=indexed_actions, index=indexed_actions)
@@ -530,15 +526,20 @@ class POLOCM:
                 action = PO_obs.action
                 current_iap = indexed_actions[i]
                 if action is not None:
-                    zero_iap = IAP(action,ind=PO_obs.index ,pos=0, sort=0)
+                    zero_iap = IAP(action,PO_obs.index ,pos=0, sort=0)
                     obj_PO_traces[zero_obj].append(zero_iap)
                     sort_aps[0].add(zero_iap.toAP())
                     # for each combination of action name A and argument pos P
                     for k, obj in enumerate(action.obj_params):
                         # create transition A.P
                         iap = IAP(action, PO_obs.index, pos=k + 1, sort=sorts[obj.name])
-                        sort_aps[sorts[obj.name]].add(iap.toAP())
-                        obj_PO_traces[obj].append(iap)
+                        exist = any(x.action == iap.action and x.ind == iap.ind for x in obj_PO_traces[obj])
+                        if not exist:
+                            obj_PO_traces[obj].append(iap)
+                            sort_aps[sorts[obj.name]].add(iap.toAP())
+                        else:
+                            dependencies[iap.action.name].add(iap.toAP())
+                      
                     for successor_ind in PO_obs.successors:
                         successor = obs_PO_trace[successor_ind]
                         assert successor != None
@@ -551,28 +552,9 @@ class POLOCM:
                         else:
                             traces_PO_matrix.at[current_iap, successor_iap]=1
                             traces_PO_matrix.at[successor_iap, current_iap]=0
-            trace_PO_matrix_overall.append(traces_PO_matrix)      
+            complete_PO(traces_PO_matrix)
+            trace_PO_matrix_overall.append(traces_PO_matrix) 
             obj_PO_trace_overall.append(obj_PO_traces)
-        
-        # constructing PO matrix of actions in each trace
-        for trace_PO_matrix in trace_PO_matrix_overall:
-            for i in range(len(trace_PO_matrix)):
-                for j in range(len(trace_PO_matrix)):
-                    if i==j:
-                        continue
-                    current = trace_PO_matrix.iloc[i,j]
-                    if (not pd.isna(current) and current == 1):
-
-                        # complete matrix based on transitivity of PO
-                        # if a>b, b>c, then a>c
-                        for x in range(len(trace_PO_matrix)):
-                            if x==i or x ==j:
-                                continue
-
-                            next = trace_PO_matrix.iloc[j,x]
-                            if (next == 1):
-                                trace_PO_matrix.iloc[i,x] = 1
-                                trace_PO_matrix.iloc[x,i] = 0
                             
     
         # Constructing PO matrix of actions for each object in each trace
@@ -590,48 +572,14 @@ class POLOCM:
                         origin = trace_PO_matrix_overall[trace_no].at[row_header.toIndexedAction(),
                                                                       col_header.toIndexedAction()]
                         obj_trace_PO_matrix.at[row_header, col_header] = origin
-                        
+                
+                complete_PO(obj_trace_PO_matrix)
                 PO_matrices[obj] = obj_trace_PO_matrix
+                complete_FO(obj_trace_FO_matrix, obj_trace_PO_matrix)
                 FO_matrices[obj] = obj_trace_FO_matrix  
             obj_trace_PO_matrix_overall.append(PO_matrices)
             obj_trace_FO_matrix_overall.append(FO_matrices)
         
-        # Completing FO matrices based on current incomplete PO matrices?
-        for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
-            for obj, PO_matrix in matrices.items():
-                FO_matrix = obj_trace_FO_matrix_overall[trace_no][obj]
-                for i in range(len(PO_matrix)):
-                    for j in range(len(PO_matrix)):
-                        if i==j:
-                            continue
-                        current_PO = PO_matrix.iloc[i,j]
-                        if current_PO == 0:
-                            FO_matrix.iloc[i,j] = 0
-                        elif current_PO == 1:
-                            flag=1
-                            for x in range(len(FO_matrix)):
-                                if x != i and x !=j:
-                                    ix = PO_matrix.iloc[i,x]
-                                    xj = PO_matrix.iloc[x,j]
-                                    # not sure
-                                    if (pd.isna(ix)or pd.isna(xj)):
-                                        flag =2
-                                    # FO_ij should be 0
-                                    if ix==1 and xj==1:
-                                        flag=0
-                                        break;
-                            # No change, FO_ij should be 1
-                            if flag==1:
-                                FO_matrix.iloc[i,j]=1
-                                FO_matrix.iloc[j,i] = 0
-                                # check nans
-                                for y in range(len(FO_matrix)):
-                                    if y!=i and y!=j:
-                                        FO_matrix.iloc[i,y] = 0
-                                        FO_matrix.iloc[y,j] = 0
-                            # FO_ij should be 0
-                            elif flag == 0:
-                                FO_matrix.iloc[i,j]=0
 
         if debug:
             printmd("# Step 1")
@@ -658,7 +606,7 @@ class POLOCM:
                 for obj, matrix in matrices.items():
                     printmd(f"#### Object {obj.name}\n")
                     print(tabulate(matrix, headers="keys", tablefmt='fancy_grid'))
-        return obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps
+        return obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies
 
     @staticmethod
     def polocm_step2(
@@ -680,28 +628,32 @@ class POLOCM:
                 cols = matrix.columns.tolist()
                 for i in range(len(matrix)):
                     for j in range(i+1,len(matrix)):
-                        if pd.isna(matrix.iloc[i,j]):
-                            var_name = f"trace_{trace_no}_{str(cols[i])}~{str(cols[j])}"
+                        if pd.isna(matrix.iloc[i,j]) or matrix.iloc[i,j] == np.nan:
+                            var_name = f"trace_{trace_no}_{repr(cols[i])}_{repr(cols[j])}"
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             PO_vars[(cols[i], cols[j])] = var 
                             matrix.iloc[i,j] = (cols[i], cols[j])
 
-                            transpose_var_name = f"trace_{trace_no}_{str(cols[j])}~{str(cols[i])}"
+                            transpose_var_name = f"trace_{trace_no}_{repr(cols[j])}_{repr(cols[i])}"
                             transpose_var = pl.LpVariable(transpose_var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             PO_vars[(cols[j], cols[i])] = transpose_var 
                             matrix.iloc[j,i] = (cols[j], cols[i])
 
-                            prob += var == 1 - transpose_var,f"sym neg {var_name}" # (i,j) == not (j,i)
+                            prob += var == 1 - transpose_var,f"sym_neg_{var_name}" # (i,j) == not (j,i)
+           
                 PO_vars_overall.append(PO_vars)
             
             for trace_no, matrices in enumerate(PO_matrix_with_vars):
+                
                 PO_vars = PO_vars_overall[trace_no]
                 for obj, matrix in matrices.items():
+                    
                     for row_header, row in matrix.iterrows():
                         for col_header, val in row.items():
                             key = (row_header.toIndexedAction(), col_header.toIndexedAction())
                             if key in PO_vars.keys():
                                 matrix.at[row_header, col_header] = key
+                   
 
             # TODO: updating the obj trace matrix?
 
@@ -711,7 +663,7 @@ class POLOCM:
                 for obj, matrix in matrices.items():
                     for row_header, row in matrix.iterrows():
                         for col_header, val in row.items():
-                            var_name= f"obj_trace_{trace_no}_{str(row_header)}~{str(col_header)}"
+                            var_name= f"obj_trace_{trace_no}_{repr(row_header)}_{repr(col_header)}"
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             PO_vars[(row_header, col_header)] = var 
                             matrix.at[row_header, col_header] = (row_header, col_header)
@@ -734,11 +686,14 @@ class POLOCM:
                                 c1_name =  f"{target} >= {current} + {next} - 1"
                                 c2_name = f"{target} <= {current} + {next}"
                                 if (c1_name not in constraints[f'Trace {trace_no}']):    
-                                    prob += target >= current + next -1, c1_name # a>b, b>c, then a>c
+                                    prob += target >= current + next -1 # a>b, b>c, then a>c
+                                    
                                     constraints[f'Trace {trace_no}'].append(c1_name)
                                 if (c2_name not in constraints[f'Trace {trace_no}']):
-                                    prob += target <= current + next, c2_name  # a<b. b<c, then a<c
+                                    prob += target <= current + next  # a<b. b<c, then a<c
+                                    
                                     constraints[f'Trace {trace_no}'].append(c2_name)
+
                                     
         if debug:
             printmd("# Step 2")
@@ -783,19 +738,20 @@ class POLOCM:
                             continue
                         current_PO = PO_vars_overall[trace_no].get(PO_matrix.iloc[i,j],PO_matrix.iloc[i,j])
                         if (pd.isna(FO_matrix.iloc[i,j])):
-                            var_name = f"FO_{trace_no}_{str(obj.name)}_{str(cols[i])}~{str(rows[j])}"
+                            var_name = f"FO_{trace_no}_{str(obj.name)}{repr(cols[i])}{repr(rows[j])}"
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             FO_vars[obj][(cols[i], rows[j])] = var 
                             FO_matrix.iloc[i,j] = (cols[i], rows[j])
                             varname_lookup[var_name] = (trace_no, obj, cols[i], rows[j])
 
                             if isinstance(current_PO, pl.LpVariable):
-                                prob += var <= current_PO, f"FO {var_name}, {current_PO}" # if PO == 0, then FO = 0; if PO==1, then FO = 1 or 0
+                                prob += var <= current_PO, f"FO_{var_name}_{current_PO}" # if PO == 0, then FO = 0; if PO==1, then FO = 1 or 0
+                               
                                 constraints[f"Trace {trace_no} - Dependency"].append(f"{var} <= {current_PO}")
                             if i>j: # if var == 1, then transpose must be 0
                                 transpose_var = FO_vars[obj].get(FO_matrix.iloc[j,i], FO_matrix.iloc[j,i])
                                 # if(1-transpose_var != current_PO):
-                                prob += var <= 1 - transpose_var, f"FO {var_name}, {1-transpose_var}"
+                                prob += var <= 1 - transpose_var, f"FO_{var_name}_{1-transpose_var}"
                                 
                         
                             candidates = []
@@ -808,20 +764,20 @@ class POLOCM:
                                     if (isinstance(ix, pl.LpVariable) or isinstance(xj, pl.LpVariable)):
                                         # aux = NAND(ix, xj)
                                         aux = pl.LpVariable(f"aux_{str(trace_no)}_{str(obj.name)}_{i}_{j}_{x}", cat=pl.LpBinary)
-                                        prob += aux <= 2-ix-xj, f"aux1 {aux.name}"
-                                        prob += aux >= ix-xj, f"aux2 {aux.name}"
-                                        prob += aux >= xj-ix, f"aux3 {aux.name}"
-                                        prob += aux <= ix+xj, f"aux4 {aux.name}"
-
+                                        prob += aux <= 2-ix-xj, f"aux1_{aux.name}"
+                                        prob += aux >= ix-xj, f"aux2_{aux.name}"
+                                        prob += aux >= xj-ix, f"aux3_{aux.name}"
+                                        prob += aux <= ix+xj, f"aux4_{aux.name}"
+                                      
                                         # var <= aux
-                                        prob += var <= aux, f"aux5 {aux.name}"
+                                        prob += var <= aux, f"aux5_{aux.name}"
                                         candidates.append(aux)
                                         
                                         constraints[f"Trace {trace_no} - AUX 0"].append(f"{var} <= aux_i{i}j{j}x{x}")
                                 
                             if (len(candidates)>0):
                                 # var = 1 if all aux = 1
-                                prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO, f"aux6 {aux.name}"
+                                prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO, f"aux6_{aux.name}"
                                
                                 constraints[f"Trace {trace_no} - AUX 1"].append(f"{var} >= {[can for can in candidates]} - {len(candidates)-1}")
             FO_vars_overall.append(FO_vars)
@@ -832,22 +788,22 @@ class POLOCM:
                 for m in range(len(FO_matrix)):
 
                     row = [FO_vars.get(FO_matrix.iloc[m,n],FO_matrix.iloc[m,n]) for n in range(len(FO_matrix)) if m!=n]
-                    rowsum= pl.lpSum(row) <= 1 # every row sum <= 1
+                    rowsum= pl.lpSum(row) # every row sum <= 1
                     if(not rowsum.isNumericalConstant()):
                         row_counter = Counter(row)
                         if (row_counter not in constraints[f"Trace {trace_no} - SUM"]):
-                            prob += rowsum, f"sum {row_counter}"
+                            prob += rowsum <=1
                             constraints[f"Trace {trace_no} - SUM"].append(row_counter)
                     col = [FO_vars.get(FO_matrix.iloc[n,m] ,FO_matrix.iloc[n,m] ) for n in range(len(FO_matrix)) if m!=n]
-                    colsum = pl.lpSum(col) <= 1 # every col sum <= 1
+                    colsum = pl.lpSum(col) # every col sum <= 1
                     if (not colsum.isNumericalConstant()):
                         col_counter = Counter(col)
                         if(col_counter not in constraints[f"Trace {trace_no} - SUM"]):
 
-                            prob+= colsum, f"sum {col_counter}"
+                            prob+= colsum <=1
                             constraints[f"Trace {trace_no} - SUM"].append(col_counter)
-                    flatten+=row             
-                prob += pl.lpSum(flatten) == len(FO_matrix)-1, f"MATRIX SUM {trace_no}, {obj.name}"
+                    flatten = flatten + row            
+                prob += pl.lpSum(flatten) == len(FO_matrix)-1, f"MATRIXSUM_{trace_no}_{obj.name}"
         if debug:
             printmd("# Step 3")
             printmd("## FO vars")
@@ -911,14 +867,15 @@ class POLOCM:
                     candidates = _sort_transition_matrix[sort].at[row_header, col_header]
                     if (isinstance(candidates, set)):
                         if (len(candidates)>0):
-                            var_name = "AP_" + str(row_header) + "~" + str(col_header)
+                            var_name = "AP_" + repr(row_header) + "_" + repr(col_header)
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             sort_AP_vars[sort][(row_header, col_header)] = var
                             matrix.at[row_header, col_header] = (row_header, col_header)
                             varname_lookup[var_name] = (sort, row_header, col_header)
 
                             for FO_var in candidates:
-                                prob += var>= FO_var, f"AP {var.name}  {FO_var.name}" # exist one
+                                prob += var>= FO_var, f"AP_{var.name}_{FO_var.name}" # exist one
+                        
                             constraints[sort].append(f"{var} >= {[x for x in _sort_transition_matrix[sort].at[row_header, col_header]]}")
                         else:
                             matrix.at[row_header, col_header] = np.nan
@@ -950,8 +907,14 @@ class POLOCM:
         debug = False
     ):
         prob += pl.lpSum(var for var_list in sort_AP_vars.values() for var in var_list.values())
+
+        num_vars = len(prob.variables())
+        num_constraints = len(prob.constraints)
         
-        prob.solve(solver)
+        try:
+            prob.solve(solver)
+        except Exception as e:
+            raise InvalidMLPTask(e, num_vars, num_constraints)
         solution = {var.name: var.varValue for var in prob.variables()}
         status = pl.LpStatus[prob.status]
         if debug:
@@ -967,7 +930,7 @@ class POLOCM:
             print(pl.value(prob.objective))
             print()
         
-        return solution
+        return solution, num_vars, num_constraints
 
     def polocm_step6(
         PO_matrix_with_vars,
@@ -984,7 +947,6 @@ class POLOCM:
         for trace_no, matrices, in enumerate(PO_matrix_with_vars):
             obj_traces: Dict[PlanningObject, List[AP]] = defaultdict(list)
             for obj,PO_matrix in matrices.items():
-                print_table(PO_matrix)
                 sol = sol_PO_matrix[trace_no][obj]
                 for i in range(len(PO_matrix)):
                     for j in range(len(PO_matrix)):
@@ -995,7 +957,6 @@ class POLOCM:
                             sol.iloc[i,j] = sol_var
                 sorted_header = sol.sum(axis=1).sort_values(ascending=False).index.tolist()
                 obj_traces[obj] = [iap.toAP() for iap in sorted_header]
-                print(obj_traces[obj])
             obj_traces_overall.append(obj_traces)
 
         
@@ -1089,7 +1050,7 @@ class POLOCM:
         graphs = []
         for sort in range(len(set(sorts.values()))):
             graphs.append(nx.DiGraph())
-        
+        dependencies = defaultdict(set)
         # obj_traces for all obs_traces in obs_tracelist, indexed by trace_no
         obj_traces_overall = []
         for obs_trace in obs_tracelist:
@@ -1105,17 +1066,24 @@ class POLOCM:
                     # for each combination of action name A and argument pos P
                     for j, obj in enumerate(action.obj_params):
                         # create transition A.P
-                        ap = AP(action, pos=j + 1, sort=sorts[obj.name])
-                        obj_traces[obj].append(ap)
-                        
-                        graphs[sorts[obj.name]].add_node(ap)
+                        sort = sorts[obj.name]
+                        ap = AP(action, pos=j + 1, sort=sort)
+                        if len(obj_traces[obj]) > 0:
+                            candidate_duplicate_action = obj_traces[obj][-1]
+                        else:
+                            candidate_duplicate_action = None
+                        if candidate_duplicate_action and candidate_duplicate_action.action == action:
+                            dependencies[candidate_duplicate_action.action.name].add(ap)
+                        else:
+                            obj_traces[obj].append(ap)
+                            graphs[sort].add_node(ap)
             obj_traces_overall.append(obj_traces)
         
         # adjacent matrix list for all sorts
         AML = []
         for obj_trace in obj_traces_overall:
             for obj, seq in obj_trace.items():
-                sort = sorts[obj.name] if obj.name!='zero' else 0
+                sort = sorts[obj.name]
                 for i in range(0, len(seq)-1):
                     
                     if (graphs[sort].has_edge(seq[i], seq[i+1])):
@@ -1128,51 +1096,51 @@ class POLOCM:
             df = nx.to_pandas_adjacency(G, nodelist=G.nodes(), dtype=int)
             AML.append(df)
             if debug:
-                print("Sort.{} AML:".format(index))
+                print("Sort{} AM:".format(index))
                 print_table(df)
-        return AML, obj_traces_overall
+        return AML, obj_traces_overall, dependencies
 
 
     @staticmethod
-    def _locm2_step2(
-        AML,
-        debug = False
-    ):
+    def _locm2_step2(AML, debug=False):
         """
-        get adjacency matrix with holes
+        Get adjacency matrix with holes
         """
         AML_with_holes = []
-        for index,AM in enumerate(AML):
+
+        for index, AM in enumerate(AML):
             df = AM.copy()
-            df1 = AM.copy()
-            if (index == 0): # zero obj
-                AML_with_holes.append(df1)
+
+            if index == 0:  # zero obj
+                AML_with_holes.append(df)
                 continue
-            # for particular adjacency matrix's copy, loop over all pairs of rows
-            for i in range(df.shape[0] - 1):
-                for j in range(i+1, df.shape[0]):
-                    idx1, idx2 = i, j
-                    row1, row2 = df.iloc[idx1,:], df.iloc[idx2, :] #we have now all pairs of rows
+            
+            df1 = df.to_numpy()  # Convert DataFrame to NumPy array for fast access
+            n = df1.shape[0]
 
-                    common_values_flag = False #for each two rows we have a common_values_flag
+            # Iterate over pairs of rows using upper triangular indices
+            for i in range(n - 1):
+                row1 = df1[i, :]
+                for j in range(i + 1, n):
+                    row2 = df1[j, :]
 
-                    # if there is a common value between two rows, turn common value flag to true
-                    for col in range(row1.shape[0]):
-                        if row1.iloc[col] > 0 and row2.iloc[col] > 0:
-                            common_values_flag = True
-                            break
+                    # Check if there is any common value in both rows (vectorized)
+                    common_values_flag = np.any((row1 > 0) & (row2 > 0))
 
-                    # now if two rows have common values, we need to check for holes.
                     if common_values_flag:
-                        for col in range(row1.shape[0]):
-                            if row1.iloc[col] > 0 and row2.iloc[col] == 0:
-                                df1.iloc[idx2,col] = 'hole'
-                            elif row1.iloc[col] == 0 and row2.iloc[col] > 0:
-                                df1.iloc[idx1, col] = 'hole'
+                        # Check for holes: one row has a value, the other has zero (vectorized)
+                        df1[i, :] = np.where((row1 == 0) & (row2 > 0), -1, df1[i, :])
+                        df1[j, :] = np.where((row1 > 0) & (row2 == 0), -1, df1[j, :])
+
+            # Convert NumPy array back to DataFrame
+            df1 = pd.DataFrame(df1, index=df.index, columns=df.columns)
+
             if debug:
-                print("Sort.{} AML with holes:".format(index))
+                print(f"Sort.{index} AML with holes:")
                 print_table(df1)
+
             AML_with_holes.append(df1)
+
         return AML_with_holes
 
     @staticmethod
@@ -1192,8 +1160,8 @@ class POLOCM:
             holes = set()
             for i in range(df.shape[0]):
                 for j in range(df.shape[1]):
-                    if df.iloc[i,j] == 'hole':
-                        holes.add(frozenset({df.index[i] , df.columns[j]}))
+                    if df.iloc[i,j] == -1:
+                        holes.add(frozenset({df.index[i] , df.columns[j]})) # no duplicates
             H_per_sort.append(holes)
             if debug:
                 print("#holes in Sort.{}: {}".format(index, len(holes)))
@@ -1224,10 +1192,8 @@ class POLOCM:
             consecutive_transitions = set()  # for a class
             for i in range(df.shape[0]):
                 for j in range(df.shape[1]):
-                    if df.iloc[i, j] != 'hole':
-                        if df.iloc[i, j] > 0:
-    #                         print("(" + df.index[i] + "," + df.columns[j] + ")")
-                            consecutive_transitions.add((df.index[i], df.columns[j]))
+                    if df.iloc[i, j] >0:
+                        consecutive_transitions.add((df.index[i], df.columns[j]))
             consecutive_transitions_per_sort.append(consecutive_transitions)
         return consecutive_transitions_per_sort
 
@@ -1240,109 +1206,77 @@ class POLOCM:
         debug=False
     ):
         """
-        build transition sets per sort
+        Build transition sets per sort with optimizations for performance.
         """
-        """LOCM 2 Algorithm in the original LOCM2 paper"""
-        
-        # contains Solution Set S for each class.
+        # Contains solution sets S for each class, stored as frozensets for hashability.
         transition_sets_per_sort = []
 
-        # for each hole for a class/sort
+        # Preprocess valid pairs into a set for fast lookup in check_valid
+        valid_pairs = set()
+        for ct_list in consecutive_transitions_per_sort:
+            valid_pairs.update(ct_list)
+
+        # For each sort
         for index, holes in enumerate(H_per_sort):
-            if debug:
-                printmd("### Sort.{}".format(index))
-            
-            # S
-            transition_set_list = [] #transition_sets_of_a_class, # intially it's empty
-            
-            if len(holes)==0:
-                if debug:
-                    print("no holes") # S will contain just T_all
-            
-            if len(holes) > 0: # if there are any holes for a class
-                if debug:
-                    print(str(len(holes)) + " holes")
-                for ind, hole in enumerate(holes):
-                    if debug:
-                        printmd("#### Hole " + str(ind + 1) + ": " + str(set(hole)))
-                    is_hole_already_covered_flag = False
-                    if len(transition_set_list)>0:
-                        for s_prime in transition_set_list:
-                            if hole.issubset(s_prime):
-                                if debug:
-                                    printmd("Hole "+ str(set(hole)) + " is already covered.")
-                                is_hole_already_covered_flag = True
+            # Initialize a set for transition sets for the current sort
+            transition_set_set = set()
+
+            transitions = transitions_per_sort[index]  # transitions is a list
+
+            if holes:  # If there are any holes for the sort
+                for hole in holes:
+                    # hole is already a frozenset
+
+                    # Check if the hole is already covered
+                    is_hole_already_covered_flag = any(
+                        hole.issubset(s_prime) for s_prime in transition_set_set
+                    )
+
+                    if not is_hole_already_covered_flag:
+                        h = hole  # h is a frozenset
+                        remaining_transitions = set(transitions) - h  # Convert transitions to set for set operations
+
+                        found_valid_set = False
+                        for size in range(len(h) + 1, len(transitions)):
+                            k = size - len(h)
+                            if k == len(remaining_transitions):
                                 break
-                        
-                    # discover a set which includes hole and is well-formed and valid against test data.
-                    # if hole is not covered, do BFS with sets of increasing sizes starting with s=hole
-                    if not is_hole_already_covered_flag: 
-                        h = hole.copy()
-                        candidate_sets = []
-                        # all subsets of T_all starting from hole's len +1 to T_all-1.
-                        for i in range(len(h)+1,len(transitions_per_sort[index])): 
-                            subsets = findsubsets(transitions_per_sort[index],i) # all subsets of length i
 
-                            for s in subsets:
-                                if h.issubset(s): # if  is subset of s
-                                    candidate_sets.append(set(s))
-                            
-                            s_well_formed_and_valid = False
-                            for s in candidate_sets:
-                                if len(s)>=i:
-                                    if debug:
-                                        printmd("Checking candidate set *" + str(s) + "* of **Sort.{}** for well formedness and Validity".format(index+1))
-                                    subset_df = AML[index].loc[list(s),list(s)]
-                                    if debug:
-                                        print_table(subset_df)
+                            # Generate combinations efficiently using generators
+                            for comb in itertools.combinations(remaining_transitions, k):
+                                s = h.union(comb)  # h is frozenset, comb is tuple
+                                s_frozen = frozenset(s)
+                                
 
-                                    # checking for well-formedness
-                                    well_formed_flag = False
-                                    well_formed_flag = check_well_formed(subset_df)
-                                    if not well_formed_flag and debug:
-                                        print("This subset is NOT well-formed")
-                                        
-                                    elif well_formed_flag:
-                                        # if well-formed validate across the data E
-                                        # to remove inappropriate dead-ends
-                                        valid_against_data_flag = False
-                                        valid_against_data_flag = check_valid(subset_df, consecutive_transitions_per_sort)
-                                        if not valid_against_data_flag and debug:
-                                            print("This subset is well-formed but invalid against example data")
+                                # Extract the subset DataFrame
+                                subset_df = AML[index].loc[list(s), list(s)]
 
-                                        if valid_against_data_flag:
-                                            if s not in transition_set_list: # do not allow copies.
-                                                transition_set_list.append(s)
-                                            if debug:
-                                                print("Hole that is covered now:")
-                                                print(list(h))
-                                            s_well_formed_and_valid = True
-                                            break 
-                            if s_well_formed_and_valid:
-                                    break
-                                            
-                                                                              
-            #step 7 : remove redundant sets S - {s1}
-            ts_copy = transition_set_list.copy()
-            for i in range(len(ts_copy)):
-                for j in range(len(ts_copy)):
-                    if ts_copy[i] < ts_copy[j]: #if subset
-                        if ts_copy[i] in transition_set_list:
-                            transition_set_list.remove(ts_copy[i])
-                    elif ts_copy[i] > ts_copy[j]:
-                        if ts_copy[j] in transition_set_list:
-                            transition_set_list.remove(ts_copy[j])
+                                # Check for well-formedness
+                                if check_well_formed(subset_df):
+                                    # Check for validity against data
+                                    if check_valid(subset_df, valid_pairs):
+                                        transition_set_set.add(s_frozen)
+                                        found_valid_set = True
+                                        break  # Exit combinations loop
+
+                            if found_valid_set:
+                                break  # Exit size loop
+
+            # Step 7: Remove redundant sets
+            # Since sets are unordered, we need a way to compare and remove subsets efficiently
+            non_redundant_sets = []
+            for s in transition_set_set:
+                if not any(s < other_set for other_set in transition_set_set if s != other_set):
+                    non_redundant_sets.append(s)
+           
+            # Step 8: Include all-transitions machine, even if it is not well-formed
+            non_redundant_sets.append(set(transitions))
+
             if debug:
-                print("\nRemoved redundancy transition set list")
-                print(transition_set_list)
-
-            #step-8: include all-transitions machine, even if it is not well-formed.
-            transition_set_list.append(set(transitions_per_sort[index])) #fallback
-            if debug:
-                printmd("#### Final transition set list")
-                print(transition_set_list)
-            transition_sets_per_sort.append(transition_set_list)
-            
+                print("#### Final transition set list for sort index", index)
+                for ts in non_redundant_sets:
+                    print(set(ts))
+            transition_sets_per_sort.append(non_redundant_sets)
 
         return transition_sets_per_sort
 
@@ -1372,23 +1306,13 @@ class POLOCM:
                 if obj != zero_obj:
                     for sort_, transition_sets in enumerate(transition_sets_per_sort):
                         for fsm_no, transitions in enumerate(transition_sets):
-                            print(seq)
+                          
                             subseq = [x for x in seq if x in transitions]
                             sort = sorts[obj.name]
                             fsm = FSM(sort, fsm_no)
                             TS[fsm][obj] = subseq
                 else:
                     TS[zero_fsm][zero_obj] = seq
-
-                    # state_n = 1
-                    # for ap in seq:
-                    #     if ap not in ap_state_pointers[zero_fsm]:
-                    #         ap_state_pointers[zero_fsm][ap] = StatePointers(state_n, state_n+1)
-
-                    #         OS[zero_fsm].append({state_n})
-                    #         OS[zero_fsm].append({state_n + 1})
-
-                    #         state_n+=2
 
             TS_overall.append(dict(TS))
         if debug:
@@ -1418,7 +1342,7 @@ class POLOCM:
         if debug:
             print('ap_state_pointers: \n', ap_state_pointers)
             print('Initialize OS: \n', OS)
-        print('ap_state_pointers: \n', ap_state_pointers)
+       
 
         # unify end - start state for consecutive transitions
         for fsm, ap_states in ap_state_pointers.items():
@@ -1428,8 +1352,8 @@ class POLOCM:
                 fsm_ts = AML[fsm.sort].loc[list(ts), list(ts)]
                 prev_aps = fsm_ts[ap]
                 for prev_ap, val in prev_aps.items():
-                    current_start, _ = POLOCM._pointer_to_set(OS[fsm], state.start, state.end)
                     if val > 0:
+                        current_start, _ = POLOCM._pointer_to_set(OS[fsm], state.start, state.end)
                         prev_state = ap_state_pointers[fsm][prev_ap]
                         _, prev_end = POLOCM._pointer_to_set(OS[fsm], prev_state.start, prev_state.end)
                         if (current_start != prev_end):
@@ -1437,25 +1361,24 @@ class POLOCM:
                                 OS[fsm][current_start] = OS[fsm][current_start].union(OS[fsm][prev_end])
                                 OS[fsm].pop(prev_end)
                 
-                # TODO: why remove?
-                post_aps = fsm_ts.loc[[ap],:].iloc[0,:]
-                for post_ap, val in post_aps.items():
-                    _, current_end = POLOCM._pointer_to_set(OS[fsm], state.start, state.end)
-                    if val > 0:
-                        post_state = ap_state_pointers[fsm][post_ap]
-                        post_start, _ = POLOCM._pointer_to_set(OS[fsm], post_state.start, post_state.end)
-                        if (current_end != post_start):
-                            OS[fsm][current_end] = OS[fsm][current_end].union(OS[fsm][post_start])
-                            OS[fsm].pop(post_start)
+                # TODO: remove? duplicated?
+                # post_aps = fsm_ts.loc[[ap],:].iloc[0,:]
+                # for post_ap, val in post_aps.items():
+                #     _, current_end = POLOCM._pointer_to_set(OS[fsm], state.start, state.end)
+                #     if val > 0:
+                #         post_state = ap_state_pointers[fsm][post_ap]
+                #         post_start, _ = POLOCM._pointer_to_set(OS[fsm], post_state.start, post_state.end)
+                #         if (current_end != post_start):
+                #             OS[fsm][current_end] = OS[fsm][current_end].union(OS[fsm][post_start])
+                #             OS[fsm].pop(post_start)
 
         
         # remove the zero-object sort if it only has one state
         if len(OS[zero_fsm]) == 1:
-            if debug:
-                print('Zero Sort removed!')
+            print('Zero Sort removed!')
             ap_state_pointers[zero_fsm] = {}
             OS[zero_fsm] = []
-        print(OS)
+     
         if debug:
             print('Final OS: \n', OS)
         return TS_overall, dict(ap_state_pointers), dict(OS)
@@ -1557,8 +1480,8 @@ class POLOCM:
         for hind, hs in HS.copy().items():
             for h in hs:
                 if not h.supported:
-                    hs.remove(h)
-            if len(hs) == 0:
+                    HS[hind].remove(h)
+            if len(HS[hind]) == 0:
                 del HS[hind]
 
         # Converts HS {HSIndex: HSItem} to a mapping of hypothesis for states of a sort {sort: {state: Hypothesis}}
@@ -1569,11 +1492,7 @@ class POLOCM:
                 print(fsm)
                 for state, hyp in Hyps.items():
                     pprint(hyp)
-        print('Learned HS:')
-        for fsm, Hyps in converted_HS.items():
-            print(fsm)
-            for state, hyp in Hyps.items():
-                pprint(hyp)
+     
         return converted_HS
 
     @staticmethod
@@ -1610,9 +1529,9 @@ class POLOCM:
                     for h2 in hs_fsm_state[i + 1 :]:
                         # check if hypothesis parameters (v1 & v2) need to be unified
                         if (
-                            (h1.B == h2.B and h1.k == h2.k and h1.k_ == h2.k_)
+                            (h1.B.action == h2.B.action and h1.k == h2.k and h1.k_ == h2.k_)
                             or
-                            (h1.C == h2.C and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
+                            (h1.C.action == h2.C.action and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
                         ):
                             v1 = state_bindings[h1]
                             v2 = state_bindings[h2]
@@ -1636,7 +1555,7 @@ class POLOCM:
                 ]
         if debug:
             pprint(bindings)
-        pprint(bindings)
+        
         return dict(bindings)
 
     @staticmethod
@@ -1651,31 +1570,53 @@ class POLOCM:
 
         # check each bindings[G][S] -> (h, P)
         for fsm, hs_fsm in HS.items():
-            for state in hs_fsm:
+            
+
+            for state, hs in hs_fsm.items():
                 # track all the h.Bs that occur in bindings[G][S]
                 pointers = OS[fsm][state]
-                aps = [ap for ap, (start, end) in ap_state_pointers[fsm].items() if end in pointers]
-                all_hB = set([ap for ap in aps])
+                # TODO: locm only checks for inaps, but outaps?
+                inaps = set(ap for ap, (start, end) in ap_state_pointers[fsm].items() if end in pointers)
+                outaps = set(ap for ap, (start, end) in ap_state_pointers[fsm].items() if start in pointers)        
                 # track the set of h.B that set parameter P
                 sets_P = defaultdict(set)
+                all_P = set()
                 for h, P in bindings[fsm][state]:
-                    sets_P[P].add(h.B)
-
+                    sets_P[P].add(h)
+                    all_P.add(h.B)     
                 # for each P, check if there is a transition h.B that never sets parameter P
                 # i.e. if sets_P[P] != all_hB
                 for P, setby in sets_P.items():
-                    if not setby == all_hB:  # P is a flawed parameter
+                    flag = True
+                    for ap in inaps:
+                        candidate_hs = {h for h in hs if h.B == ap}
+                    
+                        if len(candidate_hs) == 0:
+                            flag = False
+                            break
+                        if len(candidate_hs.intersection(setby))==0:
+                            flag = False
+                            break
+                    if flag:
+                        for ap in outaps:
+                            candidate_hs = {h for h in hs if h.C == ap}
+                            if len(candidate_hs) == 0:
+                                flag = False
+                                break
+                            if len(candidate_hs.intersection(setby))==0:
+                                flag = False
+                                break
+                    if not flag:  # P is a flawed parameter
                         # remove all bindings referencing P
                         for h, P_ in bindings[fsm][state].copy():
                             if P_ == P:
+                                
                                 bindings[fsm][state].remove(Binding(h, P_))
                         if len(bindings[fsm][state]) == 0:
                             del bindings[fsm][state]
-
         for k, v in bindings.copy().items():
             if not v:
                 del bindings[k]
-
         return bindings
 
     @staticmethod
@@ -1719,6 +1660,7 @@ class POLOCM:
     def _step7(
         OS: OSType,
         ap_state_pointers: APStatePointers,
+        dependencies,
         sorts: Sorts,
         bindings: Bindings,
         statics: Statics,
@@ -1742,16 +1684,31 @@ class POLOCM:
             pprint(bindings)
             print()
 
-        bound_param_sorts = {
-            fsm: {
-                state: [
-                    binding.hypothesis.G_
-                    for binding in bindings.get(fsm, {}).get(state, [])
-                ]
-                for state in range(len(states))
-            }
-            for fsm, states in OS.items()
-        }
+       
+        bound_param_sorts= defaultdict(dict)
+        for fsm, states in OS.items():
+            bound_param_sorts[fsm] = defaultdict(list)
+            for state in range(len(states)):
+                added_P = []
+                bs = bindings.get(fsm, {}).get(state, [])
+                if len(bs) > 0:
+                    bs.sort(key=lambda b: b.param)
+                    for binding in bs:
+                        if binding.param not in added_P:
+                            added_P.append(binding.param)
+                            bound_param_sorts[fsm][state].append(binding.hypothesis.G_)
+                else:
+                    bound_param_sorts[fsm][state] = []
+        # bound_param_sorts = {
+        #     fsm: {
+        #         state: [
+        #             binding.hypothesis.G_
+        #             for binding in bindings.get(fsm, {}).get(state, [])
+        #         ]
+        #         for state in range(len(states))
+        #     }
+        #     for fsm, states in OS.items()
+        # }
 
         actions = {}
         fluents = defaultdict(dict)
@@ -1760,9 +1717,13 @@ class POLOCM:
         for aps in ap_state_pointers.values():
             for ap in aps:
                 all_aps[ap.action.name].add(ap)
+
         for action, aps in all_aps.items():
-            param_sorts = [ap for ap in aps]
+            param_sorts = set(ap for ap in aps)
+            deps = dependencies.get(action, set())
+            param_sorts= list(param_sorts.union(deps))
             param_sorts.sort(key=lambda ap: ap.pos)
+           
             actions[action] = LearnedLiftedAction(
                 action, [f"sort{s.sort}" for s in param_sorts]
             )
@@ -1793,17 +1754,22 @@ class POLOCM:
              
                 # for each bindings on the start state (if there are any)
                 # then add each binding.hypothesis.l_
-                if fsm in bindings and start_state in bindings[fsm]:
-                    bound_param_inds = [
-                        b.hypothesis.l_ -shift   for b in bindings[fsm][start_state]
-                    ]
+                bs = bindings.get(fsm, {}).get(start_state, [])
+                added_P = []
+                if len(bs) > 0:
+                    bs.sort(key=lambda b: b.param)
+                    for h, P in bs:
+                        if P not in added_P and h.l==ap.pos:
+                            bound_param_inds.append(h.l_ - shift)
+                            added_P.append(P)
+
 
                 start_fluent = LearnedLiftedFluent(
                     start_fluent_temp.name,
                     start_fluent_temp.param_sorts,
                     [ap.pos-shift] + bound_param_inds,
                 )
-                assert len(start_fluent.param_sorts) ==  len([ap.pos-shift] + bound_param_inds), "???"
+        
                 
                 
                 fluents[fsm][start_state] = start_fluent
@@ -1818,15 +1784,24 @@ class POLOCM:
                     end_fluent_temp = fluents[fsm][end_state]
                    
                     bound_param_inds = []
-                    if fsm in bindings and end_state in bindings[fsm]:
-                        bound_param_inds = [
-                            b.hypothesis.l_ -shift  for b in bindings[fsm][end_state]
-                        ]
+                    bs = bindings.get(fsm, {}).get(end_state, [])
+                    added_P = []
+                    if len(bs) > 0:
+                        bs.sort(key=lambda b: b.param)
+                        for h, P in bs:
+                            if P not in added_P and  h.k == ap.pos:
+                                bound_param_inds.append(h.k_ - shift)
+                                added_P.append(P)
+                        # bound_param_inds = [
+                        #     b.hypothesis.l_ -shift  for b in bindings[fsm][end_state]
+                        # ]
                     end_fluent = LearnedLiftedFluent(
                         end_fluent_temp.name,
                         end_fluent_temp.param_sorts,
                         [ap.pos-shift] + bound_param_inds,
                     )
+                    
+                        
 
                     fluents[fsm][end_state] = end_fluent
                     actions[ap.action.name].update_add(end_fluent)

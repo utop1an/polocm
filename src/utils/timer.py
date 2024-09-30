@@ -3,7 +3,7 @@ from typing import Union
 
 
 def set_timer_throw_exc(
-    num_seconds: Union[float, int],
+    num_seconds: Union[float, int, None],
     exception: Exception,
     *exception_args,
     **exception_kwargs,
@@ -21,6 +21,10 @@ def set_timer_throw_exc(
         """
 
         def wrapper(*args, **kwargs):
+            # If num_seconds is None, run the function without a timeout
+            if num_seconds is None:
+                return function(*args, **kwargs)
+            
             pool = ThreadPool(processes=1)
 
             thr = pool.apply_async(function, args=args, kwds=kwargs)
@@ -61,6 +65,24 @@ def basic_timer(num_seconds: Union[float, int]):
 
     return timer
 
+class POLOCMTimeOut(Exception):
+    """
+    Raised when the time it takes to complete (or attempt to complete) POLOCM is
+    longer than the `max_time` attribute.
+    """
+    def __init__(self, max_time: float, stage: str) -> None:
+        message = f"Could not complete {stage} in {max_time} seconds or less."
+        super().__init__(message)
+
+class GeneralTimeOut(Exception):
+    """
+    Raised when the time it takes to complete a task is longer than the generator's `max_time` attribute.
+    """
+
+    def __init__(self, max_time: float):
+        message = f"Could not complete the task in {max_time} seconds or less."
+        super().__init__(message)
+
 
 class TraceSearchTimeOut(Exception):
     """
@@ -72,6 +94,14 @@ class TraceSearchTimeOut(Exception):
         message = f"The generator could not find a suitable trace in {max_time} seconds or less. Change the `max_time` attribute for the trace generator used if you would like to have more time to generate a trace."
         super().__init__(message)
 
+class TaskInitializationTimeOut(Exception):
+    """
+    Raised when the time it takes to initialize a task is longer than the generator's `max_time` attribute.
+    """
+
+    def __init__(self, max_time: float):
+        message = f"The generator could not initialize the task in {max_time} seconds or less. Change the `max_time` attribute for the trace generator used if you would like to have more time to initialize the task."
+        super().__init__(message)
 
 class InvalidTime(Exception):
     """

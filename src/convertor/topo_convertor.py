@@ -32,7 +32,6 @@ class TopoConvertor:
         self.reorder = reorder
         self.seed = rand_seed
         if self.seed:
-            print(f"Setting seed to {self.seed}")
             seed(self.seed)
 
     def flex(self, cm: pd.DataFrame):
@@ -129,7 +128,8 @@ class TopoConvertor:
         if (input_dod ==0):
             return input_cm, input_dod
         if(input_dod == 1):
-            return input_cm.replace(1,0), input_dod
+            input_cm = input_cm.replace(1,np.nan)
+            return input_cm, input_dod
         candidates = []
         output_cm = input_cm.copy()
         dod = self.measurement(input_cm) 

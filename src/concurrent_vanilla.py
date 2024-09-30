@@ -1,23 +1,22 @@
 import os
 import importlib.util
-import json
-import signal
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Pool, Manager
 from generate.pddl import VanillaSampling
 from utils import TraceSearchTimeOut
 
-alarm_time = 90
 sample_max_time = 60
 
-def handler(signum, frame):
-    raise TimeoutError("Execution time exceeded")
-
-def generate_trace(domain, domain_name, problem_name, domain_file_path, problem_file_path):
-    signal.signal(signal.SIGALRM, handler)
-    signal.alarm(alarm_time)
+def write_to_file(output_data, file_path):
     try:
-       
+        with open(file_path, 'a', buffering=1) as file:  # Line buffered
+            for output in output_data:
+                file.write(output)
+    except Exception as e:
+        print(f"Error writing to file {file_path}: {e}")
 
+def generate_trace(args):
+    domain, domain_name, problem_name, domain_file_path, problem_file_path = args
+    try:
         print(f"Generating traces for: Domain: {domain_name}, Problem: {problem_name}")
 
         vanilla = VanillaSampling(domain_file_path, problem_file_path, plan_len=50, num_traces=1, max_time=sample_max_time)
@@ -42,54 +41,57 @@ def generate_trace(domain, domain_name, problem_name, domain_file_path, problem_
         print(f"Timeout trace search: {tst}")
     except Exception as e:
         print(f"Error generating traces: {e}")
-    finally:
-        signal.alarm(0)
     return None
 
 def main():
     # Get the list of directories in the 'data/classical' folder
     dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'classical'))
-    out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'json_traces'))
+    out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'plain_traces'))
 
     directories = [d for d in os.listdir(dir) if os.path.isdir(os.path.join(dir, d))]
     directories.sort()
 
-    with open(os.path.join(out_dir, "vanilla.txt"), 'a') as file:
-        # Prepare tasks for parallel processing
+    # Create a Manager to handle the lock
+    with Manager() as manager:
+        lock = manager.Lock()
+    # Prepare the list of tasks
         tasks = []
-        with ProcessPoolExecutor(max_workers=os.cpu_count()-2) as executor:
-            # For each directory
-            for directory in directories:
-                # Construct the path to the api.py file
-                api_file_path = os.path.join(dir, directory, 'api.py')
+        for directory in directories:
+            # Construct the path to the api.py file
+            api_file_path = os.path.join(dir, directory, 'api.py')
 
-                # Check if the api.py file exists
-                if os.path.exists(api_file_path):
-                    # Load the api.py module
-                    spec = importlib.util.spec_from_file_location('api', api_file_path)
-                    api = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(api)
+            # Check if the api.py file exists
+            if os.path.exists(api_file_path):
+                # Load the api.py module
+                spec = importlib.util.spec_from_file_location('api', api_file_path)
+                api = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(api)
 
-                    # Access the 'domains' variable
-                    domains = api.domains
+                # Access the 'domains' variable
+                domains = api.domains
 
-                    # Schedule tasks for parallel processing
-                    for domain in domains:
-                        for problem in domain['problems']:
-                            domain_file, problem_file = problem
-                            domain_name = domain_file.split('.')[0]
-                            problem_name = problem_file.split('.')[0]
-                            domain_file_path = os.path.join(dir, domain_file)
-                            problem_file_path = os.path.join(dir, problem_file)
+                # Prepare tasks for parallel processing
+                for domain in domains:
+                    if (domain['name'] not in ['agricola']):
+                        continue
+                    for problem in domain['problems']:
+                        domain_file, problem_file = problem
+                        domain_name = domain_file.split('.')[0]
+                        problem_name = problem_file.split('.')[0]
+                        domain_file_path = os.path.join(dir, domain_file)
+                        problem_file_path = os.path.join(dir, problem_file)
 
-                            tasks.append(executor.submit(generate_trace, domain, domain_name, problem_name, domain_file_path, problem_file_path))
+                        tasks.append((domain, domain_name, problem_name, domain_file_path, problem_file_path))
 
-            # Process the results as they are completed
-            for future in as_completed(tasks):
-                output_data = future.result()
-                if output_data:
-                    for output in output_data:
-                        file.write(output)
+    # Use multiprocessing Pool to process the tasks
+    
+        with Pool(processes=10) as pool:
+            results = pool.map(generate_trace, tasks)
+                
+        for output_data in results:
+            if output_data:
+                write_to_file(output_data, os.path.join(out_dir, "vanilla.txt"))
+
 
 if __name__ == "__main__":
     main()

@@ -154,6 +154,7 @@ class Model:
             self.to_pddl_lifted(
                 domain_name, problem_name, domain_filename, problem_filename
             )
+
         elif isinstance(list(self.actions)[0], LearnedAction):
             self.to_pddl_grounded(
                 domain_name, problem_name, domain_filename, problem_filename
@@ -201,30 +202,41 @@ class Model:
                 lang.predicate(f.name, *f.param_sorts)
         if self.actions:
             for a in self.actions:
-                vars = [lang.variable(f"x{i}", s) for i, s in enumerate(a.param_sorts)]
-                print(a.name, vars)
-                if len(a.precond) == 1:
-                    precond = lang.get(list(a.precond)[0].name)(*[vars[i] for i in a.precond[0].param_act_inds])  # type: ignore
-                else:
-                    for f in a.precond:
-                        print(f.name ,[i for i in f.param_act_inds])
-                    precond = CompoundFormula(
-                        Connective.And,
-                        [
-                            lang.get(f.name)(*[vars[i] for i in f.param_act_inds])  # type: ignore
-                            for f in a.precond
-                        ],
-                    )
-                adds = [lang.get(f.name)(*[vars[i] for i in f.param_act_inds]) for f in a.add]  # type: ignore
-                dels = [lang.get(f.name)(*[vars[i] for i in f.param_act_inds]) for f in a.delete]  # type: ignore
-                effects = [fs.AddEffect(e) for e in adds] + [fs.DelEffect(e) for e in dels]  # fmt: skip
+                try:
+                    vars = [lang.variable(f"x{i}", s) for i, s in enumerate(a.param_sorts)]
+                    if len(a.precond) == 1:
+                        pc = list(a.precond)[0]
+                        precond = lang.get(pc.name)(*[vars[i] for i in pc.param_act_inds])  # type: ignore
+                    else:
+                        
+                        precond = CompoundFormula(
+                            Connective.And,
+                            [
+                                lang.get(f.name)(*[vars[i] for i in f.param_act_inds])  # type: ignore
+                                for f in a.precond
+                            ],
+                        )
+                    adds = [lang.get(f.name)(*[vars[i] for i in f.param_act_inds]) for f in a.add]  # type: ignore
+                    dels = [lang.get(f.name)(*[vars[i] for i in f.param_act_inds]) for f in a.delete]  # type: ignore
+                    effects = [fs.AddEffect(e) for e in adds] + [fs.DelEffect(e) for e in dels]  # fmt: skip
 
-                problem.action(
-                    a.name,
-                    parameters=vars,
-                    precondition=precond,
-                    effects=effects,
-                )
+                    problem.action(
+                        a.name,
+                        parameters=vars,
+                        precondition=precond,
+                        effects=effects,
+                    )
+                except Exception as e:
+                    print(e)
+                    print(a.name)
+                    print(vars)
+                    print("preconds")
+                    for f in a.precond:
+                        print(f"{f}, {f.param_act_inds}")
+                    print("adds")
+                    for f in a.add:
+                        print(f)
+                    raise e
 
         problem.init = tarski.model.create(lang)  # type: ignore
         problem.goal = land()  # type: ignore
@@ -260,7 +272,6 @@ class Model:
             for f in self.fluents:
                 # NOTE: want there to be no brackets in any fluents referenced as tarski adds these later.
                 # fluents (their string conversion) must be in the following format: (on object a object b)
-                test = str(f)
                 lang.predicate(str(f)[1:-1].replace(" ", "_"))
         if self.actions:
             for a in self.actions:

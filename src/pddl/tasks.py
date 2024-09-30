@@ -27,6 +27,12 @@ class Task:
         self.predicates.append(predicates.Predicate(name, parameters))
         self.axioms.append(axiom)
         return axiom
+    
+    def get_action(self, name):
+        for action in self.actions:
+            if (action.name == name):
+                return action
+        return None
 
     def dump(self):
         print("Problem %s: %s [%s]" % (

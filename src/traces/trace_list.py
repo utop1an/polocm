@@ -5,6 +5,8 @@ from warnings import warn
 from observation import Observation, ObservedTraceList
 from . import Action, Trace
 from convertor import TopoConvertor
+from utils.timer import set_timer_throw_exc, GeneralTimeOut
+from utils.common_errors import InvalidActionSequence
 
 
 class TraceList(MutableSequence):
@@ -118,6 +120,7 @@ class TraceList(MutableSequence):
                 fluents.update(step.state.fluents)
         return fluents
     
+    @set_timer_throw_exc(num_seconds=120, exception=GeneralTimeOut, max_time=120, type="topo")
     def topo(self, convertor: TopoConvertor, dod: Union[float, int]):
         """Generating partial ordered traces
 
@@ -129,11 +132,17 @@ class TraceList(MutableSequence):
         Returns:
             A TraceList with partial ordered traces
         """
+        if dod < 0 or dod > 1:
+            raise ValueError("Degree of disorder must be between 0 and")
+        if len(self.traces) == 0:
+            raise InvalidActionSequence("No traces to convert")
         po_traces = []
+        actual_dod = []
         for trace in self.traces:
             po_trace = convertor.convert(trace, dod)
             po_traces.append(po_trace)
-        return TraceList(po_traces, self.generator)
+            actual_dod.append(po_trace.degree_of_disorder)
+        return TraceList(po_traces, self.generator), sum(actual_dod) / len(actual_dod)
 
     def tokenize(
         self,
