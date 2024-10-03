@@ -13,16 +13,34 @@ from utils.common_errors import InvalidModel, InvalidActionSequence, InvalidMLPT
 from multiprocessing import Pool, Lock
 import os
 import argparse
+import logging
+import datetime
 
-debug = {}
-debug_domains = ['tidybot']
 DEBUG = False
 
 lock= Lock()
 
+# Setup logger
+def setup_logger(log_file):
+    logger = logging.getLogger('experiment_logger')
+    logger.setLevel(logging.DEBUG)
+
+    # Create a file handler for logging
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    logger.addHandler(file_handler)
+
+    return logger
+
 def run_single_experiment(args):
     """Runs a single experiment given the necessary parameters."""
-    file_name, dod, learning_obj, measurement, time_limit, seed, verbose = args
+    output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger = args
 
     domain = learning_obj['domain']
     index = learning_obj['index']
@@ -31,8 +49,8 @@ def run_single_experiment(args):
     raw_traces = learning_obj['traces']
     size = len(raw_traces)
 
-    print(f"Running for {domain} with DOD {dod}...")
-    # Formatting raw traces
+    logger.info(f"Running experiment for domain {domain} with DOD {dod}...")
+
     traces = []
     for raw_trace in raw_traces:
         steps = []
@@ -45,43 +63,46 @@ def run_single_experiment(args):
             steps.append(step)
         trace = Trace(steps)
         traces.append(trace)
-    
+
     tracelist = TraceList(traces)
     obs_tracelist = tracelist.tokenize(ActionObservation, ObservedTraceList)
 
     try:
-        if (dod ==0):
+        if dod == 0:
             runtime, accuracy_val, executability, result = single_locm2(
                 obs_tracelist,
                 domain_filename=f"{domain}_{difficulty}_{index}_tl{total_length}_size{size}_{measurement}_dod{dod}",
+                output_dir=output_dir,
                 time_limit=time_limit,
                 verbose=verbose
             )
         else:
-            # Converting partial ordered traces
             convertor = TopoConvertor(measurement, strict=True, rand_seed=seed)
             po_tracelist, actual_dod = tracelist.topo(convertor, dod)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
-            print("Running POLOCM...")
+            logger.info(f"Running POLOCM for domain {domain}...")
             runtime, accuracy_val, executability, result = single(
                 obs_po_tracelist,
                 obs_tracelist,
                 domain_filename=f"{domain}_{difficulty}_tl{total_length}_size{size}_{measurement}_dod{dod}",
+                output_dir=output_dir,
                 time_limit=time_limit,
                 verbose=verbose
             )
     except GeneralTimeOut as t:
-        runtime, accuracy_val, executability, result = tuple(i*2 for i in time_limit), 0, 0, f"Timeout: {t}"
+        runtime, accuracy_val, executability, result = tuple(i * 2 for i in time_limit), 0, 0, f"Timeout: {t}"
     except Exception as e:
-        runtime, accuracy_val, executability, result = (0,0,0), 0, 0, e
-   
-    polocm_time, locm2_time, locm_time = runtime
-    print(f"Finished experiment for {domain}. Runtime: {runtime}, F1 Score: {accuracy_val}, Executability: {executability}")
+        runtime, accuracy_val, executability, result = (0, 0, 0), 0, 0, e
+        logger.error(f"Error during experiment for domain {domain}: {e}")
 
-    clear_output()
-    
+    polocm_time, locm2_time, locm_time = runtime
+    logger.info(f"{domain}-{difficulty}-tl{total_length}-{dod}-> Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
+
+    clear_output(output_dir)
+
     result_data = {
+        'lo_id': learning_obj['id'],
         'dod': dod,
         'domain': domain,
         'index': index,
@@ -98,55 +119,71 @@ def run_single_experiment(args):
         'result': result
     }
 
-    # Write result to CSV immediately after computing
-    write_result_to_csv(file_name, result_data)
-    
+    write_result_to_csv(output_dir, result_data, logger)
+
     return result_data
 
-def experiment(file_name, dods, measurement, cores=1, time_limit=(600, 600, 300), seed=None, verbose=False):
-    print("Experiment Start...")
-    file_path = '../data/json_traces/' + file_name + '.json'
-    file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), file_path))
-    print("Reading data...")
-    with open(file_path, 'r') as file:
+def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limit=[600, 600, 300], seed=None, verbose=False):
+    log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filepath = os.path.join(output_dir, "logs", log_filename)
+    logger = setup_logger(log_filepath)
+
+    logger.info("Experiment Start...")
+    
+    logger.info(f"Reading data from {file_path}...")
+    with open(input_filepath, 'r') as file:
         data = json.load(file)
 
     if seed:
-        print(f"Setting seed to {seed}")
+        logger.info(f"Setting seed to {seed}")
+        random.seed(seed)
 
-    # Prepare tasks for parallel processing
-    tasks = []
+    task = []
     for dod in dods:
         for learning_obj in data:
-            if DEBUG and learning_obj['domain'] not in debug_domains:
-                continue
-            tasks.append((file_name, dod, learning_obj, measurement, time_limit, seed, verbose))
+            
+            task.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
+    
+    if DEBUG:
+        tasks = random.sample(task, 50)
 
-    # Use Pool to process tasks in parallel
     with Pool(processes=cores) as pool:
-        pool.map(run_single_experiment, tasks)
+        pool.starmap_async(run_single_experiment, tasks).get()
 
-    print("Experiment completed.")
+    logger.info("Experiment completed.")
+
+def write_result_to_csv(output_dir, result_data, logger):
+    """Writes the result data to a CSV file in a thread-safe manner."""
+    csv_file_path = os.path.join(output_dir, "results.csv")
+
+    with lock:
+        file_exists = os.path.exists(csv_file_path)
+        with open(csv_file_path, 'a') as csv_file:
+            if not file_exists:
+                headers = result_data.keys()
+                csv_file.write(','.join(headers) + '\n')
+
+            values = [str(result_data[key]) for key in result_data.keys()]
+            csv_file.write(','.join(values) + '\n')
+
+    logger.info(f"Results written to {csv_file_path}")
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600)
-def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, time_limit , verbose=False):
+def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
-        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_type='gurobi', debug=debug)
-        file_path = "../output/experiment/pddl/" + domain_filename + ".pddl"
-        file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), file_path))
-        tmp_file_path = "../output/experiment/pddl/tmp/" + domain_filename + ".pddl"
-        tmp_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), tmp_file_path))
+        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_type='cplex', debug=debug)
+        filename = domain_filename + ".pddl"
+        file_path = os.path.join(output_dir, "pddl", filename)
+        tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
         model.to_pddl(domain_filename, domain_filename=file_path, problem_filename=tmp_file_path)
 
-        print("Evaluating accuracy...")
         sorts = POLOCM._get_sorts(obs_tracelist)
         AML, _, __ = POLOCM._locm2_step1(obs_tracelist, sorts)
         accuracy_val, r = get_AP_accuracy(AP, AML, verbose=verbose)
         if (r):
             remark.append(r)
-        print("Evaluating executability...")
         executabililty, r = get_executability(obs_tracelist, domain_filename=file_path)
         
         if r:
@@ -162,17 +199,15 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, time_limi
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600)
-def single_locm2(obs_tracelist: TraceList, domain_filename, time_limit, verbose=False):
+def single_locm2(obs_tracelist: TraceList, domain_filename, output_dir, time_limit, verbose=False):
     try: 
         remark = []
         model, runtime = POLOCM(obs_tracelist, prob_type="locm2", time_limit=time_limit, debug=debug)
-        file_path = "../output/experiment/pddl/" + domain_filename + ".pddl"
-        file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), file_path))
-        tmp_file_path = "../output/experiment/pddl/tmp/" + domain_filename + ".pddl"
-        tmp_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), tmp_file_path))
+        filename = domain_filename + ".pddl"
+        file_path = os.path.join(output_dir, "pddl", filename)
+        tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
         model.to_pddl(domain_filename, domain_filename=file_path, problem_filename=tmp_file_path)
       
-        print("Evaluating executability...")
         executabililty, r = get_executability(obs_tracelist, domain_filename=file_path)
         if r:
             remark.append(r)
@@ -246,9 +281,8 @@ def get_executability(obs_tracelist, domain_filename=None, planner=None):
 
 import shutil
 # remove redundant task.pddl files autogenerated by the model
-def clear_output():
-    folder_path = "../output/experiment/pddl/tmp"
-    folder_path = os.path.abspath(os.path.join(os.path.dirname(__file__), folder_path))
+def clear_output(output_dir):
+    folder_path = os.path.join(output_dir, "pddl", "tmp")
     # Check if the folder exists
     if not os.path.exists(folder_path):
         print(f"Folder '{folder_path}' does not exist.")
@@ -288,11 +322,75 @@ def write_result_to_csv(file_name, result_data):
             values = [str(result_data[key]) for key in result_data.keys()]
             csv_file.write(','.join(values) + '\n')
 
+def main(args):
+    input_filepath = args.i
+    output_dir = args.o
+    seed = args.s
+    cores = args.c
+    measurement = args.m
+    time_limit = args.l
+    task_type = args.t
+
+    if task_type not in ["polocm", "locm2"]:
+        print("Invalid task type. Choose from polocm, locm2")
+        return
+    if task_type == "polocm":
+        dods = [0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
+    else:
+        dods = [0]
+
+    if measurement not in ["flex", "width"]:
+        print("Invalid measurement type. Choose from flex, width")
+        return
+
+    if cores < 1:
+        print("Invalid number of cores. Choose a number greater than 0")
+        return
+    
+    if cores > os.cpu_count():
+        print(f"Number of cores {cores} is greater than available cores {os.cpu_count()}")
+        return
+
+    if not os.path.exists(input_filepath):
+        print(f"Input file {input_filepath} does not exist")
+        return
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    log_dir = os.path.join(output_dir, "logs")
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    pddl_dir = os.path.join(output_dir, "pddl")
+    if not os.path.exists(pddl_dir):
+        os.makedirs(pddl_dir)
+
+    if time_limit and len(time_limit) > 3:
+        print("Invalid time limit. Max length 3")
+        return
+
+    if len(time_limit) ==2:
+        time_limit.append(300)
+    elif len(time_limit) ==1:
+        time_limit.append(600)
+        time_limit.append(300)
+    elif len(time_limit) ==0:
+        time_limit = [600,600,300]
+
+    
+    experiment(input_filepath,output_dir, dods, measurement, cores= cores,time_limit=time_limit, seed= seed,verbose=False)
+
+
 if __name__ == "__main__":
-    seed = 42
-    filename = 'plan_diff_s42_r1'
-    dods = [0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
-    # dods = [0]
-    measurement = 'flex'
-    cores= 6
-    experiment(filename, dods, measurement, cores= cores,time_limit=(600, 600, 300), seed= seed,verbose=False)
+    parser = argparse.ArgumentParser(description='Run experiments')
+    parser.add_argument('--i', type=str, help='Input trainning file name')
+    parser.add_argument('--o', type=str, help='Output directory')
+    parser.add_argument('--m', type=str, default="flex", help='Measurement type')
+    parser.add_argument('--s', type=int, default=42, help='Rand seed')
+    parser.add_argument('--c', type=int, default=6, help='Number of cores')
+    parser.add_argument('--t', type=string, default="polocm", help='Type of task, polocm or locm2')
+    parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
+
+    args = parser.parse_args()
+    main(args)

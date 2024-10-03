@@ -37,10 +37,10 @@ class RandomPlanner:
             self.initialize_task()
 
         traces = []
-        for _ in range(self.num_traces):
+        for i in range(self.num_traces):
             trace = self.generate_single_trace_setup()
-            self.add_type_info(trace)
-            traces.append(trace)
+            trace_with_type_info= self.add_type_info(trace)
+            traces.append(trace_with_type_info)
         return traces
 
     def generate_single_trace_setup(self):
@@ -84,19 +84,19 @@ class RandomPlanner:
             new_state[var] = post
         return tuple(new_state)
     
-    def find_obj_type(self, obj):
-        for t in self.task.objects:
-            if obj == t.name:
-                return t.type_name
-        return "unknown"
+  
 
     def add_type_info(self, trace):
+        t = []
         for op in trace:
-            o = op.name.strip("()").split(" ")
-            name = o[0]
-            args = o[1:]
-            args_with_type = []
-            for arg in args:
-                arg_type = self.find_obj_type(arg)
-                args_with_type.append(arg+"?"+arg_type)
-            op.name = "("+name+" "+" ".join(args_with_type) + ")"
+            action = op.name.strip().strip("()").split(" ")
+            action_name = action[0]
+            o = self.task.get_action(action_name)
+            assert o is not None, f"Action {action_name} not found in domain"
+
+            args = action[1:]
+            arg_types = [p.type_name for p in o.parameters]
+            arg_with_types = [arg + "?"+ t for arg, t in zip(args, arg_types)]
+            new_action = f"({action_name} {' '.join(arg_with_types)})"
+            t.append(new_action)
+        return t

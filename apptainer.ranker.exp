@@ -1,0 +1,77 @@
+Bootstrap: docker
+From: ubuntu20.04
+Stage: build
+
+%files
+    src
+    downward
+    goose-solver
+    mimir
+
+%post
+    apt-get update -y
+    # Using "noninteractive" mode runs apt-get while ensuring that there are
+    # no user prompts that would cause the `singularity build` command to hang.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        software-properties-common
+    add-apt-repository universe
+    # Downloads the latest package lists (important).
+    apt-get update -y
+    # python3-tk is required by matplotlib.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3.8 \
+        python3-tk \
+        python3-pip \
+        python3-distutils \
+        python3-setuptools
+
+    apt-get update && apt-get -y install apt-transport-https ca-certificates gnupg software-properties-common wget
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc > kitware.key
+    apt-key add kitware.key
+    apt-add-repository -y 'deb https://apt.kitware.com/ubuntu/ bionic main'
+    apt-get update -y
+
+    # cpp packages
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        cmake \
+        build-essential \
+        libboost-all-dev \
+        git-all
+
+
+    DEBIAN_FRONTEND=noninteractive apt update -y
+    DEBIAN_FRONTEND=noninteractive apt install cmake -y
+
+    # Reduce the size of the image by deleting the package lists we downloaded,
+    # which are useless now.
+    rm -rf /var/lib/apt/lists/*
+
+    # pip install --upgrade pip setuptools wheel
+
+    # Install Python modules.
+    pip install -r requirements.txt
+
+    cd /mimir
+    rm -rf build/
+    rm -rf dependencies/build/
+    cmake -S . -B build -DCMAKE_PREFIX_PATH=${PWD}/dependencies/installs
+    cmake --build build -j16
+    pip3 install . -v
+
+    cd /downward
+    rm -rf builds/release/
+    ./build.py release
+    cd ..
+
+    cd /goose-solver
+    rm -rf builds/release/
+    ./build.py release
+    cd ..
+
+    mkdir /benchmarks
+    mkdir /logs
+    mkdir /data
+    cd /logs
+    mkdir states
+    cd ..
+

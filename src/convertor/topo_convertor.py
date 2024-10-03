@@ -22,7 +22,7 @@ class TopoConvertor:
     reorder: bool
     seed: int
     
-    def __init__(self, measurement:str='flex', strict = False, reorder = True, rand_seed: int= None):
+    def __init__(self, measurement:str='flex', strict = False, reorder = True, rand_seed: int= 42):
        
         if (measurement == 'width'):
             self.measurement = self.width
@@ -93,17 +93,13 @@ class TopoConvertor:
                             else:
                                 next = pivot
                         if (current == next):
-                            
                             if (pivoting):
                                 if (i>(j+x)%len(matrix)):
                                     matrix.iloc[(j+x)%len(matrix), i] = not current
                                 else:
-                                    matrix.iloc[i, (j+x)%len(matrix)] = current
-                                   
+                                    matrix.iloc[i, (j+x)%len(matrix)] = current     
                             else:
                                 matrix.iloc[i, j+x] = current
-                        
-
         return matrix
 
     def getTOComparableMatrix(self, trace: Trace):
@@ -118,7 +114,7 @@ class TopoConvertor:
         def destroy(target_dod):
             while target_dod < input_dod:
                 if (len(candidates) == 0 ):
-                    break;
+                    break
                 index = randint(0, len(candidates)-1)
                 x,y = candidates.pop(index)
                 output_cm.iloc[x,y] = np.nan
@@ -126,10 +122,10 @@ class TopoConvertor:
             return target_dod
 
         if (input_dod ==0):
-            return input_cm, input_dod
+            return input_cm, 0
         if(input_dod == 1):
-            input_cm = input_cm.replace(1,np.nan)
-            return input_cm, input_dod
+            output_cm = pd.DataFrame(np.nan, columns=input_cm.columns, index=input_cm.index)
+            return input_cm, 1
         candidates = []
         output_cm = input_cm.copy()
         dod = self.measurement(input_cm) 
