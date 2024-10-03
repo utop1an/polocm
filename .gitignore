@@ -3,3 +3,4 @@
 **/data/training_traces/
 **/data/plain_traces/
 *.log
+*.sif

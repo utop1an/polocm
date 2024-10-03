@@ -148,7 +148,7 @@ def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limi
             task.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
     
     if DEBUG:
-        tasks = random.sample(task, 50)
+        tasks = random.sample(task, 30)
 
     with Pool(processes=cores) as pool:
         pool.starmap_async(run_single_experiment, tasks).get()
@@ -360,7 +360,7 @@ def main(args):
     if not os.path.exists(output_dir+"/pddl/tmp"):
         os.makedirs(output_dir+"/pddl/tmp")
 
-    log_dir = os.path.join(output_dir, "logs")
+    log_dir = ("./logs")
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
