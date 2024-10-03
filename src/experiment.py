@@ -108,6 +108,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         'dod': dod,
         'domain': domain,
         'index': index,
+        'num_objects': learning_obj['number_of_objects'],
         'total_length': total_length,
         'size': size,
         'difficulty': difficulty,
@@ -171,7 +172,7 @@ def write_result_to_csv(output_dir, result_data, logger):
     logger.info(f"Results written to {csv_file_path}")
 
 
-@set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600)
+@set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200)
 def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
@@ -309,7 +310,7 @@ def clear_output(output_dir):
 
 
 def main(args):
-    global SOLVER
+    global SOLVER, DEBUG
     input_filepath = args.i
     output_dir = args.o
     seed = args.s
@@ -318,6 +319,9 @@ def main(args):
     time_limit = args.l
     task_type = args.t
     cplex_dir = args.cplex
+    debug = args.debug
+    if debug:
+        DEBUG = True
 
     if task_type not in ["polocm", "locm2"]:
         print("Invalid task type. Choose from polocm, locm2")
@@ -390,5 +394,6 @@ if __name__ == "__main__":
     parser.add_argument('--t', type=str, default="polocm", help='Type of task, polocm or locm2')
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
+    parser.add_argument('--debug', action='store_true', help='Debug mode')
     args = parser.parse_args()
     main(args)
