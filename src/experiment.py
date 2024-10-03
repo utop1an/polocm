@@ -15,8 +15,10 @@ import os
 import argparse
 import logging
 import datetime
+import random
 
-DEBUG = False
+DEBUG = True
+SOLVER = "default"
 
 lock= Lock()
 
@@ -38,9 +40,9 @@ def setup_logger(log_file):
 
     return logger
 
-def run_single_experiment(args):
+def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger):
     """Runs a single experiment given the necessary parameters."""
-    output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger = args
+    # output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger = args
 
     domain = learning_obj['domain']
     index = learning_obj['index']
@@ -130,7 +132,7 @@ def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limi
 
     logger.info("Experiment Start...")
     
-    logger.info(f"Reading data from {file_path}...")
+    logger.info(f"Reading data from {input_filepath}...")
     with open(input_filepath, 'r') as file:
         data = json.load(file)
 
@@ -173,7 +175,7 @@ def write_result_to_csv(output_dir, result_data, logger):
 def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
-        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_type='cplex', debug=debug)
+        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER)
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -202,7 +204,7 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_di
 def single_locm2(obs_tracelist: TraceList, domain_filename, output_dir, time_limit, verbose=False):
     try: 
         remark = []
-        model, runtime = POLOCM(obs_tracelist, prob_type="locm2", time_limit=time_limit, debug=debug)
+        model, runtime = POLOCM(obs_tracelist, prob_type="locm2", time_limit=time_limit)
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -304,25 +306,10 @@ def clear_output(output_dir):
         except Exception as e:
             print(f"Failed to delete {file_path}. Reason: {e}")
 
-def write_result_to_csv(file_name, result_data):
-    """Writes the result data to a CSV file in a thread-safe manner."""
-    csv_file_path = f"../output/experiment/res/{file_name}.csv"
-    csv_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), csv_file_path))
-    with lock:
-        # Append result_data to the CSV file
-        # Implement the code to write to CSV
-        with open(csv_file_path, 'a') as csv_file:
-            # Assuming result_data is a dictionary and you want to write keys as headers
-            # and values as the row
-            if os.stat(csv_file_path).st_size == 0:
-                # Write headers if file is empty
-                headers = result_data.keys()
-                csv_file.write(','.join(headers) + '\n')
-            # Write the data row
-            values = [str(result_data[key]) for key in result_data.keys()]
-            csv_file.write(','.join(values) + '\n')
+
 
 def main(args):
+    global SOLVER
     input_filepath = args.i
     output_dir = args.o
     seed = args.s
@@ -330,6 +317,7 @@ def main(args):
     measurement = args.m
     time_limit = args.l
     task_type = args.t
+    cplex_dir = args.cplex
 
     if task_type not in ["polocm", "locm2"]:
         print("Invalid task type. Choose from polocm, locm2")
@@ -351,12 +339,22 @@ def main(args):
         print(f"Number of cores {cores} is greater than available cores {os.cpu_count()}")
         return
 
+    if not os.path.exists(cplex_dir):
+        print("No cplex solver provided, defualt pulp solver will be used for MLP")
+        SOLVER = "defualt"
+    else:
+        SOLVER = cplex_dir
+
     if not os.path.exists(input_filepath):
         print(f"Input file {input_filepath} does not exist")
         return
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    if not os.path.exists(output_dir+"/pddl"):
+        os.makedirs(output_dir+"/pddl")
+    if not os.path.exists(output_dir+"/pddl/tmp"):
+        os.makedirs(output_dir+"/pddl/tmp")
 
     log_dir = os.path.join(output_dir, "logs")
     if not os.path.exists(log_dir):
@@ -389,8 +387,8 @@ if __name__ == "__main__":
     parser.add_argument('--m', type=str, default="flex", help='Measurement type')
     parser.add_argument('--s', type=int, default=42, help='Rand seed')
     parser.add_argument('--c', type=int, default=6, help='Number of cores')
-    parser.add_argument('--t', type=string, default="polocm", help='Type of task, polocm or locm2')
+    parser.add_argument('--t', type=str, default="polocm", help='Type of task, polocm or locm2')
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
-
+    parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
     args = parser.parse_args()
     main(args)

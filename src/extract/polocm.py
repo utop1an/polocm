@@ -10,6 +10,8 @@ import pulp as pl
 from tabulate import tabulate
 import numpy as np
 import time
+import pandas as pd
+import itertools
 
 from traces import Action, PlanningObject
 
@@ -264,7 +266,7 @@ class POLOCM:
         view: bool = False,
         time_limit= (None, None, None),
         prob_type = 'polocm',
-        solver_type = 'cbc',
+        solver_path = 'default',
         debug: Union[bool, Dict[str, bool], List[str]] = False,
     ):
         """Creates a new Model object.
@@ -311,10 +313,10 @@ class POLOCM:
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
         
-        if solver_type == 'gurobi':
-            solver = pl.GUROBI_CMD(msg=False, timeLimit=600)
-        else:
+        if solver_path == 'default':
             solver = pl.PULP_CBC_CMD(msg=False, timeLimit=600)
+        else:
+            solver = pl.CPLEX_CMD(path=solver_path, msg=False, timeLimit=600)
         
         if prob_type == 'polocm':
             return POLOCM.polocm(sorts, obs_tracelist, time_limit, solver, debug)

@@ -3,6 +3,7 @@ import numpy as np
 from tabulate import tabulate
 from IPython.display import display, Markdown
 import string
+import pandas as pd
 
 def complete_PO(PO_matrix):
     for i in range(len(PO_matrix)):
