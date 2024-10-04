@@ -120,7 +120,7 @@ class TraceList(MutableSequence):
                 fluents.update(step.state.fluents)
         return fluents
     
-    @set_timer_throw_exc(num_seconds=120, exception=GeneralTimeOut, max_time=120, type="topo")
+    @set_timer_throw_exc(num_seconds=120, exception=GeneralTimeOut, max_time=300, source="topo")
     def topo(self, convertor: TopoConvertor, dod: Union[float, int]):
         """Generating partial ordered traces
 

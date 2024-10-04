@@ -17,7 +17,7 @@ import logging
 import datetime
 import random
 
-DEBUG = True
+DEBUG = False
 SOLVER = "default"
 
 lock= Lock()
@@ -141,14 +141,14 @@ def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limi
         logger.info(f"Setting seed to {seed}")
         random.seed(seed)
 
-    task = []
+    tasks = []
     for dod in dods:
         for learning_obj in data:
             
-            task.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
+            tasks.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
     
     if DEBUG:
-        tasks = random.sample(task, 30)
+        tasks = random.sample(tasks, 30)
 
     with Pool(processes=cores) as pool:
         pool.starmap_async(run_single_experiment, tasks).get()
@@ -172,7 +172,7 @@ def write_result_to_csv(output_dir, result_data, logger):
     logger.info(f"Results written to {csv_file_path}")
 
 
-@set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200, type="polocm")
+@set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200, source="polocm")
 def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
@@ -201,7 +201,7 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_di
     return runtime, accuracy_val, executabililty, " ".join(remark)
 
 
-@set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, type="locm2")
+@set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="locm2")
 def single_locm2(obs_tracelist: TraceList, domain_filename, output_dir, time_limit, verbose=False):
     try: 
         remark = []
