@@ -12,7 +12,10 @@
 pwd; hostname; date
 echo "--- running ---"
 
-singularity exec /src \
+# disable cplex log
+export CPLEX_LOGFILE=/dev/null
+
+singularity exec -B ~/polocm/src/:/src \
     -B ~/polocm/data/:/data \
     -B ~/polocm/logs:/logs \
     -B ~/polocm/output/:/output \

@@ -128,7 +128,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
 
 def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limit=[600, 600, 300], seed=None, verbose=False):
     log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    log_filepath = os.path.join(output_dir, "logs", log_filename)
+    log_filepath = os.path.join("./logs", log_filename)
     logger = setup_logger(log_filepath)
 
     logger.info("Experiment Start...")
@@ -172,7 +172,7 @@ def write_result_to_csv(output_dir, result_data, logger):
     logger.info(f"Results written to {csv_file_path}")
 
 
-@set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200)
+@set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200, type="polocm")
 def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
@@ -201,7 +201,7 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_di
     return runtime, accuracy_val, executabililty, " ".join(remark)
 
 
-@set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600)
+@set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, type="locm2")
 def single_locm2(obs_tracelist: TraceList, domain_filename, output_dir, time_limit, verbose=False):
     try: 
         remark = []
