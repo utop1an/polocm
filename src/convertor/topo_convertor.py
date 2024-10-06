@@ -22,7 +22,7 @@ class TopoConvertor:
     reorder: bool
     seed: int
     
-    def __init__(self, measurement:str='flex', strict = False, reorder = True, rand_seed: int= 42):
+    def __init__(self, measurement:str='flex', strict = True, reorder = True, rand_seed: int= 42):
        
         if (measurement == 'width'):
             self.measurement = self.width
@@ -111,15 +111,14 @@ class TopoConvertor:
         return cm
 
     def getPOComparableMatrix(self,input_dod, input_cm: pd.DataFrame):
-        def destroy(target_dod):
-            while target_dod < input_dod:
-                if (len(candidates) == 0 ):
+        def destroy(gap):
+            step = int(input_cm.size * gap)
+            for _ in range(step):
+                if len(candidates)==0:
                     break
-                index = randint(0, len(candidates)-1)
-                x,y = candidates.pop(index)
+                x,y = candidates.pop()
                 output_cm.iloc[x,y] = np.nan
-                target_dod = self.measurement(output_cm)
-            return target_dod
+            return self.measurement(output_cm)
 
         if (input_dod ==0):
             return input_cm, 0
@@ -133,16 +132,18 @@ class TopoConvertor:
             for j in range(i+1, len(input_cm)):
                 if not pd.isna(input_cm.iloc[i,j]):
                     candidates.append((i,j))
-        
+        shuffle(candidates)
         if self.strict:
             flag = True
+            gap = input_dod
             while flag:
-                dod = destroy(dod)
+                dod = destroy(gap)
                 output_cm = self.completeByTransitivity(output_cm)
                 dod = self.measurement(output_cm)
                 if (dod >= input_dod):
                     flag = False
                 else:
+                    gap = input_dod - dod
                     flag = True
 
         else:

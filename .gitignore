@@ -4,3 +4,4 @@
 **/data/plain_traces/
 *.log
 *.sif
+**/experiments/

@@ -17,7 +17,7 @@ import logging
 import datetime
 import random
 
-DEBUG = True
+DEBUG = False
 SOLVER = "default"
 
 lock= Lock()
@@ -68,7 +68,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
 
     tracelist = TraceList(traces)
     obs_tracelist = tracelist.tokenize(ActionObservation, ObservedTraceList)
-
+    actual_dod = 0
     try:
         if dod == 0:
             runtime, accuracy_val, executability, result = single_locm2(
@@ -106,6 +106,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
     result_data = {
         'lo_id': learning_obj['id'],
         'dod': dod,
+        'actual_dod': actual_dod,
         'domain': domain,
         'index': index,
         'num_objects': learning_obj['number_of_objects'],
@@ -141,14 +142,14 @@ def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limi
         logger.info(f"Setting seed to {seed}")
         random.seed(seed)
 
-    task = []
+    tasks = []
     for dod in dods:
         for learning_obj in data:
             
-            task.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
+            tasks.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
     
     if DEBUG:
-        tasks = random.sample(task, 30)
+        tasks = random.sample(tasks, 30)
 
     with Pool(processes=cores) as pool:
         pool.starmap_async(run_single_experiment, tasks).get()
