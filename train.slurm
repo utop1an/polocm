@@ -3,7 +3,7 @@
 #SBATCH --mail-type=END,FAIL          # Mail events (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user=u6797221@anu.edu.au     # Where to send mail
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=16
 #SBATCH --time=120:00:00
 #SBATCH --partition=normal
 #SBATCH --qos=normal
@@ -20,7 +20,7 @@ singularity exec -B ~/polocm/src/:/src \
     -B ~/polocm/logs:/logs \
     -B ~/polocm/output/:/output \
     ~/polocm/polocm.sif python3 /src/experiment.py --i ./data/traces_combined_r1.json --o ./output \
-    --c $SLURM_CPUS_PER_TASK \
+    --c 16 \
     --debug --cplex /opt/cplex/cplex/bin/x86-64_linux/cplex
 
 echo "--- done ---"

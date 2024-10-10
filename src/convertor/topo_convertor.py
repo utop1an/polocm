@@ -113,6 +113,7 @@ class TopoConvertor:
     def getPOComparableMatrix(self,input_dod, input_cm: pd.DataFrame):
         def destroy(gap):
             step = int(input_cm.size * gap)
+            step = max(step, 2)
             for _ in range(step):
                 if len(candidates)==0:
                     break

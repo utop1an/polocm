@@ -8,10 +8,11 @@ import uuid
 SEED = 42
 REPEAT = 1
 TRACELENGTH = [10,20,50,100]
-NUMBEROFTRACES =[1,5,25,50,100]
+NUMBEROFTRACES =[1,5,10,25,50,100]
 COUNTER = 0
 
 def write_to_file(output_data, file_path):
+    print(f"Writing to file {file_path} with {len(output_data)} traning data")
     try:
         with open(file_path, 'w', buffering=1) as file:  # Line buffered
             json.dump(output_data, file)
@@ -19,6 +20,7 @@ def write_to_file(output_data, file_path):
         print(f"Error writing to file {file_path}: {e}")
 
 def sample_combined(df, number_of_traces):
+    
     types = df['type'].unique()
     p1 = df[df['type'] == types[0]]
     p2 = df[df['type'] == types[1]]
@@ -30,19 +32,23 @@ def sample_combined(df, number_of_traces):
 
 def generate_trace(domain, df, number_of_traces,combined, trace_length=None, diff=""):
     global COUNTER
-    if combined == "combined":
-        rows = sample_combined(df, number_of_traces)
-    elif combined == "plan":
-        rows = df[df['type'] == 'plan'].sample(n=number_of_traces, random_state=SEED)
-    elif combined == "random":
-        rows = df[df['type'] == 'rand'].sample(n=number_of_traces, random_state=SEED)
     output = []
     for i in range(REPEAT):
+
+        if combined == "combined":
+            rows = sample_combined(df, number_of_traces)
+        elif combined == "plan":
+            rows = df[df['type'] == 'plan'].sample(n=number_of_traces, random_state=SEED)
+        elif combined == "random":
+            rows = df[df['type'] == 'rand'].sample(n=number_of_traces, random_state=SEED)
+
         traces = []
         total_length = 0
         number_of_objects = 0
         for r, row in rows.iterrows():
             plain_trace = row['trace'].split(',')
+            if len(plain_trace)<2:
+                continue
             if trace_length is not None:
                 if (len(plain_trace) <= trace_length):
                     rand_trace = plain_trace
@@ -52,12 +58,15 @@ def generate_trace(domain, df, number_of_traces,combined, trace_length=None, dif
             else:
                 rand_trace = plain_trace
             trace = []
+            
             total_length += len(rand_trace)
             number_of_objects += int(row['number_of_objects'])
             for plain_op in rand_trace:
                 op = plain_op.strip('()').split(' ')
                 trace.append({'action': op[0], 'objs': op[1:]})
             traces.append(trace)
+            if total_length + len(rand_trace) >= 1000:
+                break
         output_obj = {
             'id': COUNTER,
             'domain': domain,

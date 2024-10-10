@@ -127,13 +127,13 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
 
     return result_data
 
-def experiment(input_filepath, output_dir, dods, measurement, cores=1, time_limit=[600, 600, 300], seed=None, verbose=False):
+def experiment(input_filepath, output_dir, dods, measurement, cores=8, time_limit=[600, 600, 300], seed=None, verbose=False):
     log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_filepath = os.path.join("./logs", log_filename)
     logger = setup_logger(log_filepath)
 
     logger.info("Experiment Start...")
-    
+    logger.info(f"Using {cores} cores for parallel processing.")
     logger.info(f"Reading data from {input_filepath}...")
     with open(input_filepath, 'r') as file:
         data = json.load(file)
@@ -391,7 +391,7 @@ if __name__ == "__main__":
     parser.add_argument('--o', type=str, help='Output directory')
     parser.add_argument('--m', type=str, default="flex", help='Measurement type')
     parser.add_argument('--s', type=int, default=42, help='Rand seed')
-    parser.add_argument('--c', type=int, default=6, help='Number of cores')
+    parser.add_argument('--c', type=int, default=8, help='Number of cores')
     parser.add_argument('--t', type=str, default="polocm", help='Type of task, polocm or locm2')
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
