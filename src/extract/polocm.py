@@ -621,7 +621,6 @@ class POLOCM:
         PO_matrix_with_vars = obj_trace_PO_matrix_overall.copy()
         prob = pl.LpProblem(LP_var_type + "_var_assignments", sense=pl.LpMinimize)
         PO_vars_overall= []
-        constraints: Dict[str, List[str]] = defaultdict(list)
         if (LP_var_type == "trace"):
             
             for trace_no, matrix in enumerate(trace_PO_matrix_overall):
@@ -631,17 +630,17 @@ class POLOCM:
                 for i in range(len(matrix)):
                     for j in range(i+1,len(matrix)):
                         if pd.isna(matrix.iloc[i,j]) or matrix.iloc[i,j] == np.nan:
-                            var_name = f"trace_{trace_no}_{repr(cols[i])}_{repr(cols[j])}"
+                            var_name = f"t_{trace_no}_{repr(cols[i])}_{repr(cols[j])}"
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             PO_vars[(cols[i], cols[j])] = var 
                             matrix.iloc[i,j] = (cols[i], cols[j])
 
-                            transpose_var_name = f"trace_{trace_no}_{repr(cols[j])}_{repr(cols[i])}"
+                            transpose_var_name = f"t_{trace_no}_{repr(cols[j])}_{repr(cols[i])}"
                             transpose_var = pl.LpVariable(transpose_var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             PO_vars[(cols[j], cols[i])] = transpose_var 
                             matrix.iloc[j,i] = (cols[j], cols[i])
 
-                            prob += var == 1 - transpose_var,f"sym_neg_{var_name}" # (i,j) == not (j,i)
+                            prob += var == 1 - transpose_var # (i,j) == not (j,i)
            
                 PO_vars_overall.append(PO_vars)
             
@@ -665,7 +664,7 @@ class POLOCM:
                 for obj, matrix in matrices.items():
                     for row_header, row in matrix.iterrows():
                         for col_header, val in row.items():
-                            var_name= f"obj_trace_{trace_no}_{repr(row_header)}_{repr(col_header)}"
+                            var_name= f"ot_{trace_no}_{repr(row_header)}_{repr(col_header)}"
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             PO_vars[(row_header, col_header)] = var 
                             matrix.at[row_header, col_header] = (row_header, col_header)
@@ -682,19 +681,11 @@ class POLOCM:
                             if (x==i or x ==j):
                                 continue
                             
-                            next = PO_vars.get(matrix.iloc[j,x], matrix.iloc[j,x])
+                            _next = PO_vars.get(matrix.iloc[j,x], matrix.iloc[j,x])
                             target = PO_vars.get(matrix.iloc[i, x],matrix.iloc[i, x])
-                            if (isinstance(current, pl.LpVariable) or isinstance(next, pl.LpVariable)):
-                                c1_name =  f"{target} >= {current} + {next} - 1"
-                                c2_name = f"{target} <= {current} + {next}"
-                                if (c1_name not in constraints[f'Trace {trace_no}']):    
-                                    prob += target >= current + next -1 # a>b, b>c, then a>c
-                                    
-                                    constraints[f'Trace {trace_no}'].append(c1_name)
-                                if (c2_name not in constraints[f'Trace {trace_no}']):
-                                    prob += target <= current + next  # a<b. b<c, then a<c
-                                    
-                                    constraints[f'Trace {trace_no}'].append(c2_name)
+                            if (isinstance(current, pl.LpVariable) or isinstance(_next, pl.LpVariable)):
+                                prob += target >= current + _next -1 # a>b, b>c, then a>c
+                                prob += target <= current + _next  # a<b. b<c, then a<c
 
                                     
         if debug:
@@ -711,8 +702,6 @@ class POLOCM:
                     printmd(f"#### Obj {obj.name}")
                     print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
 
-            printmd("## PO Constraints")
-            print(tabulate(constraints, headers="keys", tablefmt="fancy_grid"))
         return prob, PO_vars_overall, PO_matrix_with_vars
 
 
@@ -747,65 +736,53 @@ class POLOCM:
                             varname_lookup[var_name] = (trace_no, obj, cols[i], rows[j])
 
                             if isinstance(current_PO, pl.LpVariable):
-                                prob += var <= current_PO, f"FO_{var_name}_{current_PO}" # if PO == 0, then FO = 0; if PO==1, then FO = 1 or 0
+                                prob += var <= current_PO # if PO == 0, then FO = 0; if PO==1, then FO = 1 or 0
                                
-                                constraints[f"Trace {trace_no} - Dependency"].append(f"{var} <= {current_PO}")
                             if i>j: # if var == 1, then transpose must be 0
                                 transpose_var = FO_vars[obj].get(FO_matrix.iloc[j,i], FO_matrix.iloc[j,i])
                                 # if(1-transpose_var != current_PO):
-                                prob += var <= 1 - transpose_var, f"FO_{var_name}_{1-transpose_var}"
+                                prob += var <= 1 - transpose_var
                                 
-                        
                             candidates = []
                             for x in range(len(FO_matrix)):
                              
                                 if (x!=i and x!=j):
                                     ix = PO_vars_overall[trace_no].get(PO_matrix.iloc[i,x],PO_matrix.iloc[i,x])
                                     xj = PO_vars_overall[trace_no].get(PO_matrix.iloc[x,j],PO_matrix.iloc[x,j])
-                                    
                                     if (isinstance(ix, pl.LpVariable) or isinstance(xj, pl.LpVariable)):
                                         # aux = NAND(ix, xj)
-                                        aux = pl.LpVariable(f"aux_{str(trace_no)}_{str(obj.name)}_{i}_{j}_{x}", cat=pl.LpBinary)
-                                        prob += aux <= 2-ix-xj, f"aux1_{aux.name}"
-                                        prob += aux >= ix-xj, f"aux2_{aux.name}"
-                                        prob += aux >= xj-ix, f"aux3_{aux.name}"
-                                        prob += aux <= ix+xj, f"aux4_{aux.name}"
+                                        aux = pl.LpVariable(f"x_{str(trace_no)}_{str(obj.name)}_{i}_{j}_{x}", cat=pl.LpBinary)
+                                        prob += aux <= 2-ix-xj
+                                        prob += aux >= ix-xj
+                                        prob += aux >= xj-ix
+                                        prob += aux <= ix+xj
                                       
                                         # var <= aux
-                                        prob += var <= aux, f"aux5_{aux.name}"
+                                        prob += var <= aux
                                         candidates.append(aux)
                                         
-                                        constraints[f"Trace {trace_no} - AUX 0"].append(f"{var} <= aux_i{i}j{j}x{x}")
-                                
                             if (len(candidates)>0):
                                 # var = 1 if all aux = 1
-                                prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO, f"aux6_{aux.name}"
+                                prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO
                                
-                                constraints[f"Trace {trace_no} - AUX 1"].append(f"{var} >= {[can for can in candidates]} - {len(candidates)-1}")
             FO_vars_overall.append(FO_vars)
         for trace_no, matrices in enumerate(FO_matrix_with_vars):
             for obj, FO_matrix in matrices.items():
                 flatten = []
                 FO_vars = FO_vars_overall[trace_no][obj]
                 for m in range(len(FO_matrix)):
-
                     row = [FO_vars.get(FO_matrix.iloc[m,n],FO_matrix.iloc[m,n]) for n in range(len(FO_matrix)) if m!=n]
                     rowsum= pl.lpSum(row) # every row sum <= 1
                     if(not rowsum.isNumericalConstant()):
-                        row_counter = Counter(row)
-                        if (row_counter not in constraints[f"Trace {trace_no} - SUM"]):
-                            prob += rowsum <=1
-                            constraints[f"Trace {trace_no} - SUM"].append(row_counter)
+                        prob += rowsum <=1
+                    
                     col = [FO_vars.get(FO_matrix.iloc[n,m] ,FO_matrix.iloc[n,m] ) for n in range(len(FO_matrix)) if m!=n]
                     colsum = pl.lpSum(col) # every col sum <= 1
                     if (not colsum.isNumericalConstant()):
-                        col_counter = Counter(col)
-                        if(col_counter not in constraints[f"Trace {trace_no} - SUM"]):
-
-                            prob+= colsum <=1
-                            constraints[f"Trace {trace_no} - SUM"].append(col_counter)
+                        prob+= colsum <=1
+                    
                     flatten = flatten + row            
-                prob += pl.lpSum(flatten) == len(FO_matrix)-1, f"MATRIXSUM_{trace_no}_{obj.name}"
+                prob += pl.lpSum(flatten) == len(FO_matrix)-1
         if debug:
             printmd("# Step 3")
             printmd("## FO vars")
@@ -820,9 +797,6 @@ class POLOCM:
                     printmd(f"#### Obj {obj.name}")
                     print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
 
-            printmd("## FO Constraints")
-            print(tabulate(constraints, headers="keys", tablefmt="fancy_grid"))
-        
         return prob, FO_vars_overall, FO_matrix_with_vars, varname_lookup
                                     
 
@@ -835,7 +809,6 @@ class POLOCM:
         varname_lookup,
         debug = False
     ):
-        constraints: Dict[int, List[str]] = defaultdict(list)
         _sort_transition_matrix: Dict[int, pd.DataFrame] = defaultdict()
         sort_transition_matrix: Dict[int, pd.DataFrame] = defaultdict()
         for sort, aps in sort_aps.items():
@@ -876,9 +849,8 @@ class POLOCM:
                             varname_lookup[var_name] = (sort, row_header, col_header)
 
                             for FO_var in candidates:
-                                prob += var>= FO_var, f"AP_{var.name}_{FO_var.name}" # exist one
+                                prob += var>= FO_var # exist one
                         
-                            constraints[sort].append(f"{var} >= {[x for x in _sort_transition_matrix[sort].at[row_header, col_header]]}")
                         else:
                             matrix.at[row_header, col_header] = np.nan
                     else:
@@ -895,10 +867,6 @@ class POLOCM:
                 printmd(f"### Sort {sort}")
                 print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
                     
-
-            printmd("## AP Constraints")
-            print(tabulate(constraints, headers="keys", tablefmt="fancy_grid"))
-
         return prob, sort_transition_matrix, sort_AP_vars, varname_lookup
 
     @staticmethod
