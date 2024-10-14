@@ -78,13 +78,14 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                 time_limit=time_limit,
                 verbose=verbose
             )
+            error_rate = 0
         else:
             convertor = TopoConvertor(measurement, strict=True, rand_seed=seed)
             po_tracelist, actual_dod = tracelist.topo(convertor, dod)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
             logger.info(f"Running POLOCM for domain {domain}...")
-            runtime, accuracy_val, executability, result = single(
+            runtime, accuracy_val,error_rate, executability, result = single(
                 obs_po_tracelist,
                 obs_tracelist,
                 domain_filename=f"{domain}_{difficulty}_tl{total_length}_size{size}_{measurement}_dod{dod}",
@@ -119,6 +120,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         'locm2_time': locm2_time,
         'locm_time': locm_time,
         'accuracy': accuracy_val,
+        'error_rate': error_rate,
         'executability': executability,
         'result': result
     }
@@ -185,7 +187,7 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_di
 
         sorts = POLOCM._get_sorts(obs_tracelist)
         AML, _, __ = POLOCM._locm2_step1(obs_tracelist, sorts)
-        accuracy_val, r = get_AP_accuracy(AP, AML, verbose=verbose)
+        accuracy_val,error_rate, r = get_AP_accuracy(AP, AML, verbose=verbose)
         if (r):
             remark.append(r)
         executabililty, r = get_executability(obs_tracelist, domain_filename=file_path)
@@ -199,7 +201,7 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_di
     except Exception as e:
         print(f"Error: {e}")
         return (0,0,0), 0, 0, e
-    return runtime, accuracy_val, executabililty, " ".join(remark)
+    return runtime, accuracy_val,error_rate, executabililty, " ".join(remark)
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="locm2")
@@ -226,10 +228,11 @@ def single_locm2(obs_tracelist: TraceList, domain_filename, output_dir, time_lim
 
 def get_AP_accuracy(AP, AML, verbose=False):
     if (len(AP)==0):
-        return 0, "AP Empty"
+        return 0,1, "AP Empty"
     if (len(AP) != len(AML)):
-        return 0, "AP Invalid Length"
-    res = []
+        return 0,1, "AP Invalid Length"
+    acc = []
+    err = []
     for sort, m1 in AP.items():
         m1 = m1.reindex(index=AML[sort].index, columns=AML[sort].columns) 
         m1 = np.where(m1>0, 1, 0)
@@ -240,8 +243,9 @@ def get_AP_accuracy(AP, AML, verbose=False):
         if (verbose):
             print(f"sort{sort}-AP array [learned]: {l1}")
             print(f"sort{sort}-AP array [ground ]: {l2}")
-        res.append(sum(l1==l2)/len(l1))
-    return sum(res)/len(res), None
+        acc.append(sum(l1==l2)/len(l1))
+        err.append(sum(l1!=l2)/len(l1))
+    return sum(acc)/len(acc), sum(err)/len(err), None
 
 # not used
 # f1 score is not suitable for this task
