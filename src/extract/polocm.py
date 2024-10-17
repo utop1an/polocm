@@ -330,10 +330,10 @@ class POLOCM:
         
         @set_timer_throw_exc(num_seconds=time_limit[0], exception=POLOCMTimeOut, max_time=time_limit[0], stage='polocm')
         def _polocm():
-            obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
+            trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
             prob, PO_vars_overall, PO_matrix_with_vars = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall,'trace', debug['pstep2'])
-            prob, FO_vars_overall, FO_matrix_with_vars, varname_lookup = POLOCM.polocm_step3(prob,PO_vars_overall, PO_matrix_with_vars, obj_trace_FO_matrix_overall, debug['pstep3'])
-            prob, sort_transition_matrix, sort_AP_vars, varname_lookup = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, FO_matrix_with_vars,varname_lookup, debug['pstep4'])
+            prob, FO_vars_overall, FO_matrix_with_vars = POLOCM.polocm_step3(prob,PO_vars_overall, PO_matrix_with_vars, obj_trace_FO_matrix_overall, debug['pstep3'])
+            prob, sort_transition_matrix, sort_AP_vars = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, FO_matrix_with_vars, debug['pstep4'])
             solution, num_vars, num_constraints = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
             FO, APs, obj_traces_overall = POLOCM.polocm_step6(PO_matrix_with_vars, PO_vars_overall,FO_matrix_with_vars, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
             return obj_traces_overall, APs, dependencies, (num_vars, num_constraints)
@@ -608,7 +608,7 @@ class POLOCM:
                 for obj, matrix in matrices.items():
                     printmd(f"#### Object {obj.name}\n")
                     print(tabulate(matrix, headers="keys", tablefmt='fancy_grid'))
-        return obj_PO_trace_overall, trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies
+        return trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies
 
     @staticmethod
     def polocm_step2(
@@ -716,12 +716,10 @@ class POLOCM:
         constraints: Dict[str, List[any]] = defaultdict(list)
         FO_matrix_with_vars = obj_trace_FO_matrix_overall.copy()
         FO_vars_overall = []
-        varname_lookup = defaultdict()
         for trace_no, matrices in enumerate(PO_matrix_with_vars):
             FO_vars: Dict[PlanningObject, Dict[tuple, pl.LpVariable]] = defaultdict(dict)
             for obj, PO_matrix in matrices.items():
-                cols = PO_matrix.columns.tolist()
-                rows = PO_matrix.index.tolist()
+                headers = PO_matrix.columns.tolist()
                 FO_matrix = FO_matrix_with_vars[trace_no][obj]
                 for i in range(len(PO_matrix)):
                     for j in range(len(PO_matrix)):
@@ -729,11 +727,10 @@ class POLOCM:
                             continue
                         current_PO = PO_vars_overall[trace_no].get(PO_matrix.iloc[i,j],PO_matrix.iloc[i,j])
                         if (pd.isna(FO_matrix.iloc[i,j])):
-                            var_name = f"FO_{trace_no}_{str(obj.name)}{repr(cols[i])}{repr(rows[j])}"
+                            var_name = f"FO_{trace_no}_{str(obj.name)}{repr(headers[i])}{repr(headers[j])}"
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
-                            FO_vars[obj][(cols[i], rows[j])] = var 
-                            FO_matrix.iloc[i,j] = (cols[i], rows[j])
-                            varname_lookup[var_name] = (trace_no, obj, cols[i], rows[j])
+                            FO_vars[obj][(headers[i], headers[j])] = var 
+                            FO_matrix.iloc[i,j] = (headers[i], headers[j])
 
                             if isinstance(current_PO, pl.LpVariable):
                                 prob += var <= current_PO # if PO == 0, then FO = 0; if PO==1, then FO = 1 or 0
@@ -797,7 +794,7 @@ class POLOCM:
                     printmd(f"#### Obj {obj.name}")
                     print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
 
-        return prob, FO_vars_overall, FO_matrix_with_vars, varname_lookup
+        return prob, FO_vars_overall, FO_matrix_with_vars
                                     
 
     def polocm_step4(
@@ -806,7 +803,6 @@ class POLOCM:
         sorts,
         FO_vars_overall,
         FO_matrix_with_vars,
-        varname_lookup,
         debug = False
     ):
         _sort_transition_matrix: Dict[int, pd.DataFrame] = defaultdict()
@@ -846,7 +842,6 @@ class POLOCM:
                             var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
                             sort_AP_vars[sort][(row_header, col_header)] = var
                             matrix.at[row_header, col_header] = (row_header, col_header)
-                            varname_lookup[var_name] = (sort, row_header, col_header)
 
                             for FO_var in candidates:
                                 prob += var>= FO_var # exist one
@@ -867,7 +862,7 @@ class POLOCM:
                 printmd(f"### Sort {sort}")
                 print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
                     
-        return prob, sort_transition_matrix, sort_AP_vars, varname_lookup
+        return prob, sort_transition_matrix, sort_AP_vars
 
     @staticmethod
     def polocm_step5(

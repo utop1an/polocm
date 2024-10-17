@@ -3,13 +3,16 @@ import pandas as pd
 import random
 import json
 import argparse
-import uuid
+from traces import *
+from observation import *
+from convertor import TopoConvertor
 
 SEED = 42
 REPEAT = 1
 TRACELENGTH = [10,20,50,100]
 NUMBEROFTRACES =[1,5,10,25,50,100]
 COUNTER = 0
+DODS = [0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
 
 def write_to_file(output_data, file_path):
     print(f"Writing to file {file_path} with {len(output_data)} traning data")
@@ -30,7 +33,7 @@ def sample_combined(df, number_of_traces):
 
     return pd.concat([p1_traces, p2_traces])
 
-def generate_trace(domain, df, number_of_traces,combined, trace_length=None, diff=""):
+def generate_trace(domain, df, number_of_traces,combined, trace_length=None):
     global COUNTER
     output = []
     for i in range(REPEAT):
@@ -71,7 +74,6 @@ def generate_trace(domain, df, number_of_traces,combined, trace_length=None, dif
             'id': COUNTER,
             'domain': domain,
             'index': i,
-            'difficulty': diff,
             'total_length': total_length,
             'traces': traces,
             'number_of_objects': int(number_of_objects/len(traces))
@@ -79,7 +81,44 @@ def generate_trace(domain, df, number_of_traces,combined, trace_length=None, dif
         output.append(output_obj)
         COUNTER += 1
     return output
-        
+
+def get_PO_data(data):
+    convertor = TopoConvertor('flex', strict=True, rand_seed=SEED)
+    po_data = []
+    for d in data:
+        traces = []
+        for raw_trace in d['traces']:
+            steps = []
+            for i, raw_step in enumerate(raw_trace):
+                action_name = raw_step['action']
+                obj_names = raw_step['objs']
+                objs = [PlanningObject('na', obj) for obj in obj_names]
+                action = Action(action_name, objs)
+                step = Step({}, action, i)
+                steps.append(step)
+            trace = Trace(steps)
+            traces.append(trace)
+
+        tracelist = TraceList(traces)
+
+        for dod in DODS:
+            po_tracelist, actual_dod = tracelist.topo(convertor, dod)
+            po_traces = [] # todo: convert po_tracelist to json
+            if actual_dod - dod > 0.1:
+                print(f"Warning: DOD mismatch. Expected: {dod}, Actual: {actual_dod}")
+            new_data = {
+                'id': d['id'],
+                'domain': d['domain'],
+                'index': d['index'],
+                'total_length': d['total_length'],
+                'traces': po_traces,
+                'number_of_objects': d['number_of_objects'],
+                'dod': dod,
+                'actual_dod': actual_dod
+            }
+            po_data.append(new_data)
+    return po_data
+                
 
 def main(args):
     global SEED, REPEAT
@@ -87,7 +126,6 @@ def main(args):
     output_dir = args.o
     seed = args.s
     repeat = args.r
-    isDiff = args.d
     combined = args.c
     SEED = seed
     REPEAT = repeat
@@ -113,37 +151,30 @@ def main(args):
                 input_data.loc[len(input_data)] = raw
     
     output_data = []
-    domains = input_data['domain'].unique()
+    domains = input_data['domain'].unique() 
     difficulty = input_data['difficulty'].unique()
     for domain in domains:
-        if isDiff:
-            for diff in difficulty:
-                df = input_data[(input_data['domain'] == domain) & (input_data['difficulty']==diff)]
-                if (len(df)==0):
-                    continue
-                for length in TRACELENGTH:
-                    for num in NUMBEROFTRACES:
-                        if num > len(df):
-                            break
-                        output = generate_trace(domain, df, num, combined,trace_length=length, diff=diff)
-                        output_data= output_data + output
-        else:
-            df = input_data[input_data['domain'] == domain]
-            for length in TRACELENGTH:
-                for num in NUMBEROFTRACES:
-                    if num > len(df):
-                        break
-                    output = generate_trace(domain, df, num, combined,trace_length=length)
-                    output_data= output_data + output
+        df = input_data[input_data['domain'] == domain]
+        for length in TRACELENGTH:
+            for num in NUMBEROFTRACES:
+                if num > len(df):
+                    break
+                output = generate_trace(domain, df, num, combined,trace_length=length)
+                output_data= output_data + output
     
-    output_filename = 'traces'
-    if (isDiff):
-        output_filename += '_diff'
-    output_filename += f'_{combined}'
-    output_filename += f'_r{REPEAT}.json'
+    output_filename_pre = 'traces'
+    output_filename_pre += f'_{combined}_r{REPEAT}'
+    output_filename = f'{output_filename_pre}_dod{0}.json'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     write_to_file(output_data, os.path.join(output_dir, output_filename))
+
+    
+    # po_data = get_PO_data(output_data)
+    # for dod in DODS:
+    #     dod_data = [d for d in po_data if d['dod'] == dod]
+    #     output_filename = f'{output_filename_pre}_dod{dod}.json'
+    #     write_to_file(po_data, os.path.join(output_dir, output_filename))
 
 
 if __name__ == '__main__':

@@ -43,11 +43,11 @@ class TopoConvertor:
         1 means totally unordered and 0 means totally ordered.
         """
         total_pairs = cm.shape[0] * (cm.shape[0] - 1) / 2
-        comparable_pairs = np.count_nonzero(~np.isnan(cm))/2  # Since the matrix is symmetric
+        comparable_pairs = np.count_nonzero(cm == 1)
         return 1 - comparable_pairs / total_pairs
     
   
-    def width(self, cm: pd.DataFrame):
+    def width(self, cm):
         """
         The length of the largest anti-chain of the poset,
         i.e. the largest subset of the poset such that none of the pairs in it is comparable.
@@ -80,6 +80,7 @@ class TopoConvertor:
         Returns:
             A NumPy 2D array with transitive relations completed.
         """
+
         n = matrix.shape[0]
         
         # Loop over each pair (i, j) in the upper triangle of the matrix
@@ -106,20 +107,18 @@ class TopoConvertor:
                 cm[i, j] = 1
         return cm
 
-    def getPOComparableMatrix(self,input_dod, input_cm: pd.DataFrame):
+    def getPOComparableMatrix(self,input_dod, input_cm):
         def destroy(gap, repeats):
             min_step = math.ceil(repeats/10)
             candidates = np.argwhere(output_cm == 1)
+            np.random.shuffle(candidates)
             n = input_cm.shape[0]
             step = int(n*(n-1)/2 * gap)
             step = max(step,  min_step)
             idx_to_remove = np.random.choice(len(candidates), size=step, replace = False)
             for idx in idx_to_remove:
             
-                x,y = candidates[idx]
-                output_cm[x,y] = np.nan
-            return self.measurement(output_cm)
-
+                x,y = candidates[idx]  
         if (input_dod ==0):
             return input_cm, 0
         if(input_dod == 1):
@@ -150,7 +149,7 @@ class TopoConvertor:
         return output_cm, dod
 
 
-    def getPOTrace(self,cm: pd.DataFrame, dod: float, to_trace: Trace):
+    def getPOTrace(self,cm, dod: float, to_trace: Trace):
         po_steps: List[PartialOrderedStep] = [
             PartialOrderedStep(to_step.state, to_step.action, to_step.index, []) for to_step in to_trace.steps
         ]
@@ -163,10 +162,10 @@ class TopoConvertor:
         
         return PartialOrderedTrace(po_steps, dod, cm)
     
-    def convert(self, to_trace, degree_of_disorder):
+    def convert(self, to_trace, input_dod):
         to_cm = self.getTOComparableMatrix(to_trace)
-        po_cm, dod = self.getPOComparableMatrix(degree_of_disorder, to_cm)
-        return self.getPOTrace(po_cm, dod, to_trace)
+        po_cm, output_dod = self.getPOComparableMatrix(input_dod, to_cm)
+        return self.getPOTrace(po_cm, output_dod, to_trace)
     
 
     

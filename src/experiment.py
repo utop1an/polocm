@@ -59,7 +59,10 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         for i, raw_step in enumerate(raw_trace):
             action_name = raw_step['action']
             obj_names = raw_step['objs']
-            objs = [PlanningObject('na', obj) for obj in obj_names]
+            objs = []
+            for obj in obj_names:
+                obj_name, obj_type = obj.split("?")
+                objs.append(PlanningObject(obj_type, obj_name))
             action = Action(action_name, objs)
             step = Step({}, action, i)
             steps.append(step)
