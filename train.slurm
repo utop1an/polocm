@@ -1,13 +1,13 @@
 #! /bin/bash
-#SBATCH --job-name=polocm_debug
+#SBATCH --job-name=polocm
 #SBATCH --mail-type=END,FAIL          # Mail events (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user=u6797221@anu.edu.au     # Where to send mail
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=4
 #SBATCH --time=120:00:00
 #SBATCH --partition=normal
 #SBATCH --qos=normal
-#SBATCH --output=polocm_%j.log
+#SBATCH --output=%j_polocm.log
 # Standard output and error log
 pwd; hostname; date
 echo "--- running ---"
