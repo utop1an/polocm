@@ -42,7 +42,6 @@ def setup_logger(log_file):
 
 def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger):
     """Runs a single experiment given the necessary parameters."""
-    # output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger = args
 
     domain = learning_obj['domain']
     index = learning_obj['index']
@@ -128,11 +127,11 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         'result': result
     }
 
-    write_result_to_csv(output_dir, result_data, logger)
+    write_result_to_csv(output_dir, dod, result_data, logger)
 
     return result_data
 
-def experiment(input_filepath, output_dir, dods, measurement, cores=8, time_limit=[600, 600, 300], seed=None, verbose=False):
+def experiment(input_filepath, output_dir, dod, measurement, cores=8, time_limit=[600, 600, 300], seed=None, verbose=False):
     log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_filepath = os.path.join("./logs", log_filename)
     logger = setup_logger(log_filepath)
@@ -148,10 +147,9 @@ def experiment(input_filepath, output_dir, dods, measurement, cores=8, time_limi
         random.seed(seed)
 
     tasks = []
-    for dod in dods:
-        for learning_obj in data:
-            
-            tasks.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
+    for learning_obj in data:
+        tasks.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
+        
     
     if DEBUG:
         tasks = random.sample(tasks, 30)
@@ -161,9 +159,9 @@ def experiment(input_filepath, output_dir, dods, measurement, cores=8, time_limi
 
     logger.info("Experiment completed.")
 
-def write_result_to_csv(output_dir, result_data, logger):
+def write_result_to_csv(output_dir,dod, result_data, logger):
     """Writes the result data to a CSV file in a thread-safe manner."""
-    csv_file_path = os.path.join(output_dir, "results.csv")
+    csv_file_path = os.path.join(output_dir, f"results_{dod}.csv")
 
     with lock:
         file_exists = os.path.exists(csv_file_path)
@@ -323,24 +321,16 @@ def main(args):
     output_dir = args.o
     seed = args.s
     cores = args.c
-    measurement = args.m
+    dod = args.d
     time_limit = args.l
-    task_type = args.t
     cplex_dir = args.cplex
     debug = args.debug
     if debug:
         DEBUG = True
 
-    if task_type not in ["polocm", "locm2"]:
-        print("Invalid task type. Choose from polocm, locm2")
-        return
-    if task_type == "polocm":
-        dods = [0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
-    else:
-        dods = [0]
-
-    if measurement not in ["flex", "width"]:
-        print("Invalid measurement type. Choose from flex, width")
+    dods = [0, 0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
+    if dod not in dods:
+        print(f"Invalid dod {dod}. Choose from {dods}")
         return
 
     if cores < 1:
@@ -389,17 +379,16 @@ def main(args):
         time_limit = [600,600,300]
 
     
-    experiment(input_filepath,output_dir, dods, measurement, cores= cores,time_limit=time_limit, seed= seed,verbose=False)
+    experiment(input_filepath,output_dir, dod, 'flex', cores= cores,time_limit=time_limit, seed= seed,verbose=False)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run experiments')
     parser.add_argument('--i', type=str, help='Input trainning file name')
     parser.add_argument('--o', type=str, help='Output directory')
-    parser.add_argument('--m', type=str, default="flex", help='Measurement type')
+    parser.add_argument('--d', type=str, default="0", help='dod')
     parser.add_argument('--s', type=int, default=42, help='Rand seed')
     parser.add_argument('--c', type=int, default=8, help='Number of cores')
-    parser.add_argument('--t', type=str, default="polocm", help='Type of task, polocm or locm2')
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
     parser.add_argument('--debug', action='store_true', help='Debug mode')

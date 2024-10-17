@@ -8,7 +8,7 @@
 #SBATCH --time=120:00:00
 #SBATCH --partition=normal
 #SBATCH --qos=normal
-#SBATCH --output=%j_polocm.log
+#SBATCH --output=%j_polocm_2.log
 # Standard output and error log
 pwd; hostname; date
 echo "--- running ---"
@@ -16,7 +16,7 @@ echo "--- running ---"
 # disable cplex log
 export CPLEX_LOGFILE=/dev/null
 
-for dod in 0 0.1 0.2 0.3 0.4 0.5; do
+for dod in 0.6 0.7 0.8 0.9 1; do
     echo "Running with --d=$dod"
     singularity exec -B ~/polocm/src/:/src \
         -B ~/polocm/data/:/data \
