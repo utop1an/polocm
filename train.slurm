@@ -23,7 +23,7 @@ for dod in 0 0.1 0.2 0.3 0.4 0.5; do
         -B ~/xLOCM/logs:/logs \
         -B ~/xLOCM/output/:/output \
         ~/xLOCM/polocm.sif python3 /src/experiment.py --i ./data/traces_combined_r1_dod0.json --o ./output \
-        --c 8 \ 
+        --c 8 \
         --d $dod \
         --cplex /opt/cplex/cplex/bin/x86-64_linux/cplex
 
