@@ -45,7 +45,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
 
     domain = learning_obj['domain']
     index = learning_obj['index']
-    difficulty = learning_obj['difficulty']
     total_length = learning_obj['total_length']
     raw_traces = learning_obj['traces']
     size = len(raw_traces)
@@ -71,16 +70,17 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
     tracelist = TraceList(traces)
     obs_tracelist = tracelist.tokenize(ActionObservation, ObservedTraceList)
     actual_dod = 0
+    error_rate = 0
     try:
         if dod == 0:
             runtime, accuracy_val, executability, result = single_locm2(
                 obs_tracelist,
-                domain_filename=f"{domain}_{difficulty}_{index}_tl{total_length}_size{size}_{measurement}_dod{dod}",
+                domain_filename=f"{domain}_{index}_tl{total_length}_size{size}_{measurement}_dod{dod}",
                 output_dir=output_dir,
                 time_limit=time_limit,
                 verbose=verbose
             )
-            error_rate = 0
+            
         else:
             convertor = TopoConvertor(measurement, strict=True, rand_seed=seed)
             po_tracelist, actual_dod = tracelist.topo(convertor, dod)
@@ -90,7 +90,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
             runtime, accuracy_val,error_rate, executability, result = single(
                 obs_po_tracelist,
                 obs_tracelist,
-                domain_filename=f"{domain}_{difficulty}_tl{total_length}_size{size}_{measurement}_dod{dod}",
+                domain_filename=f"{domain}_tl{total_length}_size{size}_{measurement}_dod{dod}",
                 output_dir=output_dir,
                 time_limit=time_limit,
                 verbose=verbose
@@ -102,7 +102,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         logger.error(f"Error during experiment for domain {domain}: {e}")
 
     polocm_time, locm2_time, locm_time = runtime
-    logger.info(f"{domain}-{difficulty}-tl{total_length}-{dod}-> Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
+    logger.info(f"{domain}-tl{total_length}-{dod}-> Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
 
     clear_output(output_dir)
 
@@ -115,7 +115,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         'num_objects': learning_obj['number_of_objects'],
         'total_length': total_length,
         'size': size,
-        'difficulty': difficulty,
         'measurement': measurement,
         'runtime': sum(runtime),
         'polocm_time': polocm_time,
@@ -152,7 +151,7 @@ def experiment(input_filepath, output_dir, dod, measurement, cores=8, time_limit
         
     
     if DEBUG:
-        tasks = random.sample(tasks, 30)
+        tasks = random.sample(tasks, 15)
 
     with Pool(processes=cores) as pool:
         pool.starmap_async(run_single_experiment, tasks).get()
@@ -245,7 +244,7 @@ def get_AP_accuracy(AP, AML, verbose=False):
             print(f"sort{sort}-AP array [learned]: {l1}")
             print(f"sort{sort}-AP array [ground ]: {l2}")
         acc.append(sum(l1==l2)/len(l1))
-        err.append(sum(l1!=l2)/len(l1))
+        err.append(np.sum((l2==0)& (l1==1))/len(l1)) # false positive rate?
     return sum(acc)/len(acc), sum(err)/len(err), None
 
 # not used
@@ -386,7 +385,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run experiments')
     parser.add_argument('--i', type=str, help='Input trainning file name')
     parser.add_argument('--o', type=str, help='Output directory')
-    parser.add_argument('--d', type=str, default="0", help='dod')
+    parser.add_argument('--d', type=float, default=0, help='dod')
     parser.add_argument('--s', type=int, default=42, help='Rand seed')
     parser.add_argument('--c', type=int, default=8, help='Number of cores')
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')

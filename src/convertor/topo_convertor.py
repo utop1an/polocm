@@ -114,11 +114,12 @@ class TopoConvertor:
             np.random.shuffle(candidates)
             n = input_cm.shape[0]
             step = int(n*(n-1)/2 * gap)
+            min_step = min(len(candidates), min_step)
             step = max(step,  min_step)
             idx_to_remove = np.random.choice(len(candidates), size=step, replace = False)
             for idx in idx_to_remove:
-            
                 x,y = candidates[idx]  
+                output_cm[x,y] = np.nan
         if (input_dod ==0):
             return input_cm, 0
         if(input_dod == 1):
