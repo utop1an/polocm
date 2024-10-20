@@ -88,7 +88,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
             actual_dod = poat['actual_dod']
             inds = poat['traces_inx']
             pos = poat['po']
-            traces = []
+            po_traces = []
             for i,trace in enumerate(tracelist):
                 po = pos[i]
                 ind = inds[i]
@@ -97,8 +97,8 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                     step = trace[po_step_ind]
                     po_step = PartialOrderedStep(step.state, step.action, step.index, po[j])
                     po_steps.append(po_step)
-                traces.append(PartialOrderedTrace(steps, actual_dod))
-            po_tracelist = TraceList(traces)
+                po_traces.append(PartialOrderedTrace(steps, actual_dod))
+            po_tracelist = TraceList(po_traces)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
             logger.info(f"Running POLOCM for domain {domain}...")
