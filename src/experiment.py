@@ -92,7 +92,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
             for trace in tracelist:
                 steps =[]
                 for i,po_step_ind in enumerate(ind):
-                    step = trace[i]
+                    step = trace[po_step_ind]
                     po_step = PartialOrderedStep(step.state, step.action, step.index, po[i])
                     steps.append(po_step)
                 traces.append(PartialOrderedTrace(steps, actual_dod))
