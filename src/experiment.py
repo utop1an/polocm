@@ -94,10 +94,10 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                 ind = inds[i]
                 po_steps =[]
                 for j,po_step_ind in enumerate(ind):
-                    step = trace[po_step_ind]
-                    po_step = PartialOrderedStep(step.state, step.action, step.index, po[j])
+                    ori_step = trace[po_step_ind]
+                    po_step = PartialOrderedStep(ori_step.state, ori_step.action, ori_step.index, po[j])
                     po_steps.append(po_step)
-                po_traces.append(PartialOrderedTrace(steps, actual_dod))
+                po_traces.append(PartialOrderedTrace(po_steps, actual_dod))
             po_tracelist = TraceList(po_traces)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
