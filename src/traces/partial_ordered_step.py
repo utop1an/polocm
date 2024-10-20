@@ -21,7 +21,7 @@ class PartialOrderedStep(Step):
             The indices of all other unordered steps that is partially ordered after this step.
     """
 
-    def __init__(self, state: State, action: Optional[Action], index: Optional[int], successors: Optional[List[int]]):
+    def __init__(self, state: State, action: Action, index: Optional[int], successors: List[int]):
         """Initializes a Step with a state and optionally an action.
 
         Args:

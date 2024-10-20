@@ -29,7 +29,7 @@ class PartialOrderedTrace(Trace):
             The set of actions in the trace.
     """
 
-    def __init__(self, steps: List[PartialOrderedStep] = None, degree_of_disorder=None, comparable_matrix= None):
+    def __init__(self, steps: List[PartialOrderedStep] = [], degree_of_disorder=None):
         """Initializes a Trace with an optional list of steps.
 
         Args:
@@ -37,9 +37,8 @@ class PartialOrderedTrace(Trace):
                 Optional; The list of steps in the trace. Defaults to an empty
                 `list`.
         """
-        self.steps = steps if steps is not None else []
+        self.steps = steps
         self.degree_of_disorder = degree_of_disorder
-        self.comparable_matrix = comparable_matrix
         self.__reinit_actions_and_fluents()
 
     def __eq__(self, other):

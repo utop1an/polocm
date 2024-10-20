@@ -62,7 +62,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                 obj_name, obj_type = obj.split("?")
                 objs.append(PlanningObject(obj_type, obj_name))
             action = Action(action_name, objs)
-            step = Step({}, action, i)
+            step = Step(State(), action, i)
             steps.append(step)
         trace = Trace(steps)
         traces.append(trace)
@@ -82,8 +82,21 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
             )
             
         else:
-            convertor = TopoConvertor(measurement, strict=True, rand_seed=seed)
-            po_tracelist, actual_dod = tracelist.topo(convertor, dod)
+            poats = learning_obj['pos']
+            i = int((dod * 10)-1)
+            poat = poats[i]
+            actual_dod = poat['actual_dod']
+            ind = poat['traces_inx']
+            po = poat['po']
+            traces = []
+            for trace in tracelist:
+                steps =[]
+                for i,po_step_ind in enumerate(ind):
+                    step = trace[i]
+                    po_step = PartialOrderedStep(step.state, step.action, step.index, po[i])
+                    steps.append(po_step)
+                traces.append(PartialOrderedTrace(steps, actual_dod))
+            po_tracelist = TraceList(traces)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
             logger.info(f"Running POLOCM for domain {domain}...")
@@ -176,10 +189,10 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
 
 
 @set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200, source="polocm")
-def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_dir, time_limit , verbose=False):
+def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
-        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER)
+        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm')
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -197,15 +210,15 @@ def single(obs_po_tracelist: TraceList,obs_tracelist, domain_filename, output_di
         if len(remark)==0:
             remark = ['Success']
     except POLOCMTimeOut as t:
-        return tuple(i*2 for i in time_limit), 0, 0, f"Timeout: {t}"
+        return tuple(i*2 for i in time_limit), 0, 0,0, f"Timeout: {t}"
     except Exception as e:
         print(f"Error: {e}")
-        return (0,0,0), 0, 0, e
+        return (0,0,0), 0,0, 0, e
     return runtime, accuracy_val,error_rate, executabililty, " ".join(remark)
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="locm2")
-def single_locm2(obs_tracelist: TraceList, domain_filename, output_dir, time_limit, verbose=False):
+def single_locm2(obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit, verbose=False):
     try: 
         remark = []
         model, runtime = POLOCM(obs_tracelist, prob_type="locm2", time_limit=time_limit)

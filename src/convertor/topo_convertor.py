@@ -3,7 +3,7 @@ from traces.trace import Trace
 from traces.step import Step
 from traces.partial_ordered_trace import PartialOrderedTrace, PartialOrderedStep
 import pandas as pd
-from typing import List
+from typing import Callable, List
 from random import *
 import numpy as np
 import itertools
@@ -16,8 +16,7 @@ class TopoConvertor:
     Given...
     """
     
- 
-    measurement: callable
+    measurement: Callable
     batch_destroy: bool
     strict: bool
     reorder: bool
@@ -145,12 +144,12 @@ class TopoConvertor:
                     flag = True
 
         else:
-            dod = destroy(dod)
+            dod = destroy(input_dod, 1)
 
         return output_cm, dod
 
 
-    def getPOTrace(self,cm, dod: float, to_trace: Trace):
+    def getPOTrace(self,cm, dod, to_trace: Trace):
         po_steps: List[PartialOrderedStep] = [
             PartialOrderedStep(to_step.state, to_step.action, to_step.index, []) for to_step in to_trace.steps
         ]
@@ -161,7 +160,7 @@ class TopoConvertor:
         if self.reorder:
             shuffle(po_steps)
         
-        return PartialOrderedTrace(po_steps, dod, cm)
+        return PartialOrderedTrace(po_steps, dod)
     
     def convert(self, to_trace, input_dod):
         to_cm = self.getTOComparableMatrix(to_trace)

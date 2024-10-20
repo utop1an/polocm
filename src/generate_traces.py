@@ -53,7 +53,8 @@ def process_domain(domain, solution_dir, task_dir, trace_length, num_traces, rdP
             continue
 
         planner = RandomPlanner(domain_filepath, task_filepath, plan_len=trace_length, num_traces=num_traces, max_time=rdPlannerTimeout, seed=seed)
-        planner.initialize_task()
+        if not planner.task or not planner.task.objects:
+            raise Exception("Reading model for RdPlanner failed...")
         number_of_objects = len(planner.task.objects)
         if max_objects is not None and number_of_objects > max_objects:
             continue

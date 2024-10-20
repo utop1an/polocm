@@ -1,10 +1,10 @@
 from multiprocessing.pool import ThreadPool
-from typing import Union
+from typing import Callable, Union
 
 
 def set_timer_throw_exc(
     num_seconds: Union[float, int, None],
-    exception: Exception,
+    exception: Callable,
     *exception_args,
     **exception_kwargs,
 ):

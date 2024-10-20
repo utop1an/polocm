@@ -1,8 +1,10 @@
 from collections.abc import MutableSequence
-from typing import Callable, List, Type, Union
+from typing import Callable, List, Optional, Type, Union
 from warnings import warn
 
 from observation import Observation, ObservedTraceList
+from observation.observed_partial_order_tracelist import ObservedPartialOrderTraceList
+from traces.partial_ordered_trace import PartialOrderedTrace
 from . import Action, Trace
 from convertor import TopoConvertor
 from utils.timer import set_timer_throw_exc, GeneralTimeOut
@@ -16,8 +18,8 @@ class TraceList(MutableSequence):
     problem.
 
     Attributes:
-        traces (List[Trace]):
-            The list of `Trace` objects.
+        traces (List[Trace]|List[PartialOrderedTrace]):
+            The list of `Trace` or `PartialOrderedTrace` objects.
         generator (Callable | None):
             The function used to generate the traces.
     """
@@ -32,13 +34,13 @@ class TraceList(MutableSequence):
             self.message = message
             super().__init__(message)
 
-    traces: List[Trace]
+    traces: List[Trace] | List[PartialOrderedTrace]
     generator: Union[Callable, None]
 
     def __init__(
         self,
-        traces: List[Trace] = None,
-        generator: Callable = None,
+        traces:  List[Trace] | List[PartialOrderedTrace] = [],
+        generator: Optional[Callable] = None,
     ):
         """Initializes a TraceList with a list of traces and a generator.
 
@@ -48,13 +50,13 @@ class TraceList(MutableSequence):
             generator (Callable):
                 Optional; The function used to generate the traces.
         """
-        self.traces = [] if traces is None else traces
+        self.traces = traces
         self.generator = generator
 
     def __getitem__(self, key: int):
         return self.traces[key]
 
-    def __setitem__(self, key: int, value: Trace):
+    def __setitem__(self, key: int, value):
         self.traces[key] = value
 
     def __delitem__(self, key: int):
@@ -69,7 +71,7 @@ class TraceList(MutableSequence):
     def copy(self):
         return self.traces.copy()
 
-    def insert(self, key: int, value: Trace):
+    def insert(self, key: int, value):
         self.traces.insert(key, value)
 
     def sort(self, reverse: bool = False, key: Callable = lambda e: e.get_total_cost()):
@@ -120,11 +122,11 @@ class TraceList(MutableSequence):
                 fluents.update(step.state.fluents)
         return fluents
     
-    @set_timer_throw_exc(num_seconds=120, exception=GeneralTimeOut, max_time=300, source="topo")
+    @set_timer_throw_exc(num_seconds=120, exception=GeneralTimeOut, max_time=120, source="topo")
     def topo(self, convertor: TopoConvertor, dod: Union[float, int]):
         """Generating partial ordered traces
 
-        Args:
+        Args:z
             convertor (TopoConvertor):
                 the way to convert
             dod:
@@ -147,7 +149,7 @@ class TraceList(MutableSequence):
     def tokenize(
         self,
         Token: Type[Observation],
-        ObsLists: Type[ObservedTraceList] = ObservedTraceList,
+        ObsLists: Type[ObservedTraceList]| Type[ObservedPartialOrderTraceList],
         **kwargs,
     ):
         """Tokenizes the steps in this trace.

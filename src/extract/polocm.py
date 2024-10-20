@@ -35,8 +35,8 @@ class AP:
     """Action.Position (of object parameter). Position is 1-indexed."""
 
     action: Action
-    pos: int  # NOTE: 1-indexed
-    sort: int
+    pos: int|None  # NOTE: 1-indexed
+    sort: int|None
 
     def __repr__(self) -> str:
         return f"{self.action.name}_{self.pos}"
@@ -56,8 +56,8 @@ class IAP:
 
     action: Action
     ind: int # NOTE: index of Action in the Trace
-    pos: int  # NOTE: 1-indexed
-    sort: int
+    pos: int|None  # NOTE: 1-indexed
+    sort: int|None
 
     def __repr__(self) -> str:
         ending = f"_{self.pos}" if self.pos is not None else ""
@@ -79,37 +79,7 @@ class IAP:
     def toAP(self):
         return AP(self.action, self.pos, self.sort)
 
-@dataclass
-class IndexedAction:
-    """
     
-    """
-    action: Action
-    ind: int
-
-    def __repr__(self) -> str:
-        return f"{self.action.name}[{self.ind}]"
-
-    def __hash__(self):
-        return hash(self.action.name + str(self.ind))
-
-    def __eq__(self, other):
-        return hash(self) == hash(other)
-    
-@dataclass
-class Transition:
-    from_ap: IndexedAction | IAP
-    to_ap: IndexedAction | IAP
-
-    def __repr__(self) -> str:
-        pass
-
-    def __hash__(self):
-        return hash(self.from_ap.__hash__() + self.to_ap.__hash__())
-
-    def __eq__(self, other):
-        return hash(self) == hash(other) 
-
 @dataclass
 class FSM:
     sort: int
@@ -290,9 +260,9 @@ class POLOCM:
                 Raised if the observations are not identity observation.
         """
         if prob_type == "polocm" and obs_tracelist.type is not PartialOrderedActionObservation:
-            raise IncompatibleObservationToken(obs_tracelist.type, POLOCM)
+            raise IncompatibleObservationToken(obs_tracelist.type, 'polocm')
         if prob_type == "locm2" and obs_tracelist.type is not ActionObservation:
-            raise IncompatibleObservationToken(obs_tracelist.type, LOCM2)
+            raise IncompatibleObservationToken(obs_tracelist.type, 'locm2')
         
         if isinstance(debug, bool) and debug:
             debug = defaultdict(lambda: True)
@@ -304,7 +274,7 @@ class POLOCM:
             debug = defaultdict(lambda: False)
 
         if (len(time_limit)!=3):
-            raise Exception(message="Invalid Time Limit")
+            raise Exception("Invalid Time Limit")
         fluents, actions = None, None
 
         if (sorts is None):
@@ -388,25 +358,12 @@ class POLOCM:
     def locm2(sorts, obs_tracelist, time_limit, debug):
         @set_timer_throw_exc(num_seconds=time_limit[1], exception=POLOCMTimeOut, max_time=time_limit[1], stage='locm2')
         def _locm2():
-            start = time.time()
             AML, obj_traces_overall, dependencies = POLOCM._locm2_step1(obs_tracelist, sorts, debug['2step0'])
-            step1_time = time.time() - start
-            print("Step 1 done in ", step1_time)
             AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
-            step2_time = time.time() - start - step1_time
-            print("Step 2 done in ", step2_time)
             H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['2step3'])
-            step3_time = time.time() - start - step1_time - step2_time
-            print("Step 3 done in ", step3_time)
             transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
-            step4_time = time.time() - start - step1_time - step2_time - step3_time
-            print("Step 4 done in ", step4_time)
             consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
-            step5_time = time.time() - start - step1_time - step2_time - step3_time - step4_time
-            print("Step 5 done in ", step5_time)
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
-            step6_time = time.time() - start - step1_time - step2_time - step3_time - step4_time - step5_time
-            print("Step 6 done in ", step6_time)
             return AML, S, obj_traces_overall, dependencies
         
         @set_timer_throw_exc(num_seconds=time_limit[2], exception=POLOCMTimeOut, max_time=time_limit[2], stage='locm')
@@ -436,7 +393,7 @@ class POLOCM:
         except Exception as e:
             raise e
     
-        return Model(fluents, actions), (0, locm2_time, locm_time)
+        return model, (0, locm2_time, locm_time)
         
     @staticmethod
     def _get_sorts(obs_tracelist: ObservedTraceList, debug=False) -> Sorts:
@@ -521,7 +478,7 @@ class POLOCM:
             indexed_actions = [IAP(obs.action, obs.index, None, None) for obs in obs_PO_trace]
             traces_PO_matrix = pd.DataFrame(columns=indexed_actions, index=indexed_actions)
             # collect action sequences for each object
-            obj_PO_traces: Dict[PlanningObject, List[AP]] = defaultdict(list)
+            obj_PO_traces: Dict[PlanningObject, List[AP|IAP]] = defaultdict(list)
             for i, PO_obs in enumerate(obs_PO_trace):
                 
 
@@ -588,7 +545,7 @@ class POLOCM:
             printmd("## Obj PO traces:\n")
             for i, obj_PO_traces in enumerate(obj_PO_trace_overall):
                 printmd(f"### Trace **{i}**\n")
-                print(tabulate(obj_PO_traces, headers='keys', tablefmt='psql'))
+                print(tabulate(obj_PO_traces.items(), headers='keys', tablefmt='psql'))
 
             printmd("## Traces PO Matrix")
             for i, matrix in enumerate(trace_PO_matrix_overall):
@@ -713,7 +670,6 @@ class POLOCM:
         obj_trace_FO_matrix_overall,
         debug= False
     ):
-        constraints: Dict[str, List[any]] = defaultdict(list)
         FO_matrix_with_vars = obj_trace_FO_matrix_overall.copy()
         FO_vars_overall = []
         for trace_no, matrices in enumerate(PO_matrix_with_vars):
@@ -780,12 +736,13 @@ class POLOCM:
                     
                     flatten = flatten + row            
                 prob += pl.lpSum(flatten) == len(FO_matrix)-1
+        
         if debug:
             printmd("# Step 3")
             printmd("## FO vars")
             for trace_no, FO_vars in enumerate(FO_vars_overall):
                 printmd(f"### Trace {trace_no}")
-                print(tabulate(FO_vars, headers="keys", tablefmt="fancy_grid"))
+                print(tabulate(FO_vars.items(), headers="keys", tablefmt="fancy_grid"))
 
             printmd("## FO matrix with vars")
             for trace_no, matrices in enumerate(FO_matrix_with_vars):
@@ -796,7 +753,7 @@ class POLOCM:
 
         return prob, FO_vars_overall, FO_matrix_with_vars
                                     
-
+    @staticmethod
     def polocm_step4(
         prob,
         sort_aps,
@@ -854,13 +811,13 @@ class POLOCM:
         if debug:
             printmd("# Step 4")
             printmd("## AP vars")
-            print(tabulate(sort_AP_vars, headers="keys", tablefmt="fancy_grid"))
+            print(tabulate(sort_AP_vars.items(), headers="keys", tablefmt="fancy_grid"))
                 
 
             printmd("## AP matrix with vars")
             for sort, matrix in sort_transition_matrix.items():
                 printmd(f"### Sort {sort}")
-                print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
+                print(tabulate(matrix.values, headers="keys", tablefmt="fancy_grid"))
                     
         return prob, sort_transition_matrix, sort_AP_vars
 
@@ -879,7 +836,7 @@ class POLOCM:
         try:
             prob.solve(solver)
         except Exception as e:
-            raise InvalidMLPTask(e, num_vars, num_constraints)
+            raise InvalidMLPTask(str(e), num_vars, num_constraints)
         solution = {var.name: var.varValue for var in prob.variables()}
         status = pl.LpStatus[prob.status]
         if debug:
@@ -897,6 +854,7 @@ class POLOCM:
         
         return solution, num_vars, num_constraints
 
+    @staticmethod
     def polocm_step6(
         PO_matrix_with_vars,
         PO_vars_overall,
@@ -966,7 +924,7 @@ class POLOCM:
 
     @staticmethod
     def _locm2_step0(
-        obj_traces_overall: ObservedTraceList, sorts: Sorts, debug: bool = False
+        obj_traces_overall, sorts: Sorts, debug: bool = False
     ):
         """
         build transition graphs
@@ -1250,8 +1208,8 @@ class POLOCM:
     
     @staticmethod
     def _step1(
-        obj_traces_overall: ObservedTraceList, sorts: Sorts, transition_sets_per_sort, AML, debug: bool = False
-    ) -> Tuple[TSType, APStatePointers, OSType]:
+        obj_traces_overall, sorts: Sorts, transition_sets_per_sort, AML, debug: bool = False
+    ) -> Tuple[List[TSType], APStatePointers, OSType]:
         """Step 1: Create a state machine for each object sort
         Implicitly includes Step 2 (zero analysis) by including the zero-object throughout
         """

@@ -15,16 +15,21 @@ class RandomPlanner:
         self.problem = problem
         self.plan_len = plan_len
         self.num_traces = num_traces
+        
         self.seed = seed
+        if self.seed:
+            random.seed(self.seed)
         self.max_time = max_time
-        self.task = None  # Task is initialized later to avoid non-pickleable issues
-        self.sas_task = None
+        
+        task = open(self.domain, self.problem)
+        normalize(task)
+        self.task = task
+        self.sas_task = pddl_to_sas(task)
 
     @set_timer_throw_exc(num_seconds=30, exception=TaskInitializationTimeOut, max_time=30)
     def initialize_task(self):
         """Initialize the task from domain and problem files. This should be called in the worker process."""
-        if self.seed:
-            random.seed(self.seed)
+        
         # Load and normalize the task only when needed
         task = open(self.domain, self.problem)
         normalize(task)
