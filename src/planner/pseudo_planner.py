@@ -3,18 +3,26 @@ import pddl_parser
 import translate.normalize as normalize
 import os
 from utils.common_errors import InvalidModel, InvalidActionSequence
+from utils import (
+    set_timer_throw_exc,
+    GeneralTimeOut
+)
 
 class PseudoPlanner:
     def __init__(self, domain_filename, executability_type='overall') -> None:
         self.domain_filename = domain_filename
         try:
-            file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), domain_filename))
-            domain =pddl_parser.open(domain_filename)
-            normalize.normalize(domain)
-            self.domain = domain
+            self.initialize_task()
             self.executability_type = executability_type
         except Exception as e:
             raise InvalidModel(domain_filename, e)
+
+    @set_timer_throw_exc(num_seconds=30, exception=GeneralTimeOut, max_time=30, source="pseudo planner")
+    def initialize_task(self):
+        """Initialize the task from domain and problem files. This should be called in the worker process."""
+        domain = pddl_parser.open(self.domain_filename)
+        normalize.normalize(domain)
+        self.domain = domain
 
     def check_executability(self,action_sequence, debug=False):
         if (self.executability_type == 'overall'):

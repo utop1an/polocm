@@ -5,7 +5,7 @@ from translate.normalize import normalize
 from utils import (
     set_timer_throw_exc,
     TraceSearchTimeOut,
-    TaskInitializationTimeOut
+    GeneralTimeOut
 )
 
 class RandomPlanner:
@@ -21,12 +21,10 @@ class RandomPlanner:
             random.seed(self.seed)
         self.max_time = max_time
         
-        task = open(self.domain, self.problem)
-        normalize(task)
-        self.task = task
-        self.sas_task = pddl_to_sas(task)
+        self.initialize_initial_task()
 
-    @set_timer_throw_exc(num_seconds=30, exception=TaskInitializationTimeOut, max_time=30)
+
+    @set_timer_throw_exc(num_seconds=30, exception=GeneralTimeOut, max_time=30, source="random planner")
     def initialize_task(self):
         """Initialize the task from domain and problem files. This should be called in the worker process."""
         
