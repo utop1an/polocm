@@ -20,8 +20,10 @@ class RandomPlanner:
         if self.seed:
             random.seed(self.seed)
         self.max_time = max_time
-        
-        self.initialize_initial_task()
+        try: 
+            self.initialize_initial_task()
+        except Exception as e:
+            raise InvalidModel(domain, e)
 
 
     @set_timer_throw_exc(num_seconds=30, exception=GeneralTimeOut, max_time=30, source="random planner")
