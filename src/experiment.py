@@ -75,7 +75,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         if dod == 0:
             runtime, accuracy_val, executability, result = single_locm2(
                 obs_tracelist,
-                domain_filename=f"{domain}_{index}_tl{total_length}_size{size}_{measurement}_dod{dod}",
+                domain_filename=f"{domain}_{index}_{learning_obj['id']}_dod{dod}",
                 output_dir=output_dir,
                 time_limit=time_limit,
                 verbose=verbose
@@ -89,6 +89,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
             inds = poat['traces_inx']
             pos = poat['po']
             po_traces = []
+            
             for i,trace in enumerate(tracelist):
                 po = pos[i]
                 ind = inds[i]
@@ -98,6 +99,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                     po_step = PartialOrderedStep(ori_step.state, ori_step.action, ori_step.index, po[j])
                     po_steps.append(po_step)
                 po_traces.append(PartialOrderedTrace(po_steps, actual_dod))
+            
             po_tracelist = TraceList(po_traces)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
@@ -105,7 +107,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
             runtime, accuracy_val,error_rate, executability, result = single(
                 obs_po_tracelist,
                 obs_tracelist,
-                domain_filename=f"{domain}_tl{total_length}_size{size}_{measurement}_dod{dod}",
+                domain_filename=f"{domain}_{index}_{learning_obj['id']}_dod{dod}",
                 output_dir=output_dir,
                 time_limit=time_limit,
                 verbose=verbose
@@ -117,7 +119,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
         logger.error(f"Error during experiment for domain {domain}: {e}")
 
     polocm_time, locm2_time, locm_time = runtime
-    logger.info(f"{domain}-tl{total_length}-{dod}-> Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
+    logger.info(f"{domain}-lo.{learning_obj['id']}-{dod}  Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
 
     clear_output(output_dir)
 
@@ -194,7 +196,7 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
 def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
-        model, AP, runtime, mlp_info = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm')
+        model, AP, runtime = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm')
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)

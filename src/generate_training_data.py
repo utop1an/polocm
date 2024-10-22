@@ -9,11 +9,12 @@ from convertor import TopoConvertor
 
 SEED = 42
 REPEAT = 1
-TRACELENGTH = [10,20,50,100]
-NUMBEROFTRACES =[1,5,10,25,50,100]
+TRACELENGTH = [10,15,30,50,75,100]
+NUMBEROFTRACES =[1,3,5,10,25,50,100]
 COUNTER = 0
 DODS = [0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
 CONVERTOR = None
+PO = False
 
 def write_to_file(output_data, file_path):
     print(f"Writing to file {file_path} with {len(output_data)} traning data")
@@ -38,7 +39,7 @@ def generate_trace(domain, df, number_of_traces,combined, trace_length=None):
     global COUNTER
     output = []
     for i in range(REPEAT):
-
+        number_of_traces = min(number_of_traces, len(df))
         if combined == "combined":
             rows = sample_combined(df, number_of_traces)
         elif combined == "plan":
@@ -72,7 +73,11 @@ def generate_trace(domain, df, number_of_traces,combined, trace_length=None):
             if total_length + len(rand_trace) >= 1000:
                 break
         
-        poats = get_PO_data(traces)
+        if PO:
+            poats = get_PO_data(traces)
+        else:
+            poats = []
+
         output_obj = {
             'id': COUNTER,
             'domain': domain,
@@ -132,12 +137,15 @@ def get_PO_data(raw_traces):
                 
 
 def main(args):
-    global SEED, REPEAT, CONVERTOR
+    global SEED, REPEAT, CONVERTOR, PO
     input_filepath = args.i
     output_dir = args.o
     seed = args.s
     repeat = args.r
     combined = args.c
+    po = args.po
+    if po:
+        PO = True
     SEED = seed
     REPEAT = repeat
     if SEED is not None:
@@ -171,6 +179,8 @@ def main(args):
             for num in NUMBEROFTRACES:
                 if num > len(df):
                     break
+                if length * num > 1000:
+                    break
                 output = generate_trace(domain, df, num, combined,trace_length=length)
                 output_data= output_data + output
     
@@ -181,12 +191,6 @@ def main(args):
         os.makedirs(output_dir)
     write_to_file(output_data, os.path.join(output_dir, output_filename))
 
-    
-    # po_data = get_PO_data(output_data)
-    # for dod in DODS:
-    #     dod_data = [d for d in po_data if d['dod'] == dod]
-    #     output_filename = f'{output_filename_pre}_dod{dod}.json'
-    #     write_to_file(po_data, os.path.join(output_dir, output_filename))
 
 
 if __name__ == '__main__':
@@ -195,8 +199,8 @@ if __name__ == '__main__':
     parser.add_argument('--o', type=str, help='Output directory')
     parser.add_argument('--s', type=int, default=42, help='Seed for random generation')
     parser.add_argument('--r', type=int, default=1, help='Number of times to repeat the generation')
-    parser.add_argument('--d', type=bool, default=False, help='Generate traces for different difficulty levels')
     parser.add_argument('--c', type=str, default="combined", help='Generate traces combining plans and random walks or only plans or only random walks')
+    parser.add_argument('--po', action='store_true', help='Generate PO data')
     args = parser.parse_args()
 
     main(args)

@@ -33,74 +33,104 @@ from .learned_fluent import LearnedLiftedFluent
 @dataclass
 class AP:
     """Action.Position (of object parameter). Position is 1-indexed."""
-
+    __slots__ = ("action", "pos", "sort", "_repr", "_str", "_hash")
     action: Action
-    pos: int|None  # NOTE: 1-indexed
-    sort: int|None
+    pos: int | None  # NOTE: 1-indexed
+    sort: int | None
 
-    def __repr__(self) -> str:
-        return f"{self.action.name}_{self.pos}"
+    def __post_init__(self):
+        # Cache __repr__, __str__, and __hash__ results
+        self._repr = f"{self.action.name}_{self.pos}"
+        self._str = f"{self.action.name}.{self.pos}"
+        self._hash = hash((self.action.name, self.pos))
 
-    def __str__(self) -> str:
-        return f"{self.action.name}.{self.pos}"
+    def __repr__(self):
+        return self._repr
+
+    def __str__(self):
+        return self._str
 
     def __hash__(self):
-        return hash(self.action.name + str(self.pos))
+        return self._hash
 
     def __eq__(self, other):
-        return hash(self) == hash(other)
-    
+        if not isinstance(other, AP):
+            return False
+        return (self.action.name, self.pos) == (other.action.name, other.pos)
+
 @dataclass
 class IAP:
     """Indexed Action.Position (of object parameter). Position is 1-indexed."""
-
+    __slots__ = ("action", "ind", "pos", "sort", "_repr", "_str", "_hash")
     action: Action
-    ind: int # NOTE: index of Action in the Trace
-    pos: int|None  # NOTE: 1-indexed
-    sort: int|None
+    ind: int  # NOTE: index of Action in the Trace
+    pos: int | None  # NOTE: 1-indexed
+    sort: int | None
 
-    def __repr__(self) -> str:
-        ending = f"_{self.pos}" if self.pos is not None else ""
-        return f"{self.ind}_{self.action.name}{ending}"
+    def __post_init__(self):
+        # Cache __repr__, __str__, and __hash__ results
+        pos_part = f"_{self.pos}" if self.pos is not None else ""
+        self._repr = f"{self.ind}_{self.action.name}{pos_part}"
+        str_pos_part = f".{self.pos}" if self.pos is not None else ""
+        self._str = f"[{self.ind}]{self.action.name}{str_pos_part}"
+        self._hash = hash((self.action.name, self.ind, self.pos))
 
-    def __str__(self) -> str:
-        ending = f".{self.pos}" if self.pos is not None else ""
-        return f"[{self.ind}]{self.action.name}{ending}"
+    def __repr__(self):
+        return self._repr
+
+    def __str__(self):
+        return self._str
 
     def __hash__(self):
-        return hash(self.action.name + str(self.ind) + str(self.pos))
+        return self._hash
 
     def __eq__(self, other):
-        return hash(self) == hash(other)
-    
+        if not isinstance(other, IAP):
+            return False
+        return (
+            self.action.name,
+            self.ind,
+            self.pos
+        ) == (
+            other.action.name,
+            other.ind,
+            other.pos
+        )
+
     def toIndexedAction(self):
-        return IAP(self.action, self.ind, None,None)
-    
+        return IAP(self.action, self.ind, None, None)
+
     def toAP(self):
         return AP(self.action, self.pos, self.sort)
 
-    
 @dataclass
 class FSM:
+    __slots__ = ("sort", "index", "_repr", "_hash")
     sort: int
     index: int
 
-    def __repr__(self) -> str:
-        return f"S{self.sort}F{self.index}"
-    
+    def __post_init__(self):
+        # Cache __repr__ and __hash__ results
+        self._repr = f"S{self.sort}F{self.index}"
+        self._hash = hash((self.sort, self.index))
+
+    def __repr__(self):
+        return self._repr
+
     def __hash__(self):
-        return hash((self.sort, self.index))
-    
-    def __eq__(self, value: object) -> bool:
-        return hash(self) == hash(value)
+        return self._hash
+
+    def __eq__(self, other):
+        if not isinstance(other, FSM):
+            return False
+        return (self.sort, self.index) == (other.sort, other.index)
 
 class StatePointers(NamedTuple):
     start: int
     end: int
 
-    def __repr__(self) -> str:
-        return f"({self.start} -> {self.end})"
-
+    def __repr__(self):
+        return f"({self.start}-{self.end})"
 
 Sorts = Dict[str, int]  # {obj_name: sort}
 APStatePointers = Dict[FSM, Dict[AP, StatePointers]]  # {FSM: {AP: APStates}}
@@ -275,7 +305,6 @@ class POLOCM:
 
         if (len(time_limit)!=3):
             raise Exception("Invalid Time Limit")
-        fluents, actions = None, None
 
         if (sorts is None):
             sorts = POLOCM._get_sorts(obs_tracelist, debug["sorts"])
@@ -301,12 +330,12 @@ class POLOCM:
         @set_timer_throw_exc(num_seconds=time_limit[0], exception=POLOCMTimeOut, max_time=time_limit[0], stage='polocm')
         def _polocm():
             trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
-            prob, PO_vars_overall, PO_matrix_with_vars = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall,'trace', debug['pstep2'])
+            prob, PO_vars_overall, PO_matrix_with_vars = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall, debug['pstep2'])
             prob, FO_vars_overall, FO_matrix_with_vars = POLOCM.polocm_step3(prob,PO_vars_overall, PO_matrix_with_vars, obj_trace_FO_matrix_overall, debug['pstep3'])
             prob, sort_transition_matrix, sort_AP_vars = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, FO_matrix_with_vars, debug['pstep4'])
-            solution, num_vars, num_constraints = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
+            solution = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
             FO, APs, obj_traces_overall = POLOCM.polocm_step6(PO_matrix_with_vars, PO_vars_overall,FO_matrix_with_vars, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
-            return obj_traces_overall, APs, dependencies, (num_vars, num_constraints)
+            return obj_traces_overall, APs, dependencies
         
         @set_timer_throw_exc(num_seconds=time_limit[1], exception=POLOCMTimeOut, max_time=time_limit[1], stage='locm2')
         def _locm2(obj_traces_overall):
@@ -337,7 +366,7 @@ class POLOCM:
         
         try:
             start = time.time()
-            obj_traces_overall, APs, dependencies, mlp_info = _polocm()
+            obj_traces_overall, APs, dependencies = _polocm()
             polocm_time = time.time() - start
             print("MLP done...")
             AML, S = _locm2(obj_traces_overall)
@@ -352,7 +381,7 @@ class POLOCM:
             raise e
         
       
-        return model, APs, (polocm_time, locm2_time, locm_time), mlp_info
+        return model, APs, (polocm_time, locm2_time, locm_time)
     
     @staticmethod
     def locm2(sorts, obs_tracelist, time_limit, debug):
@@ -571,61 +600,45 @@ class POLOCM:
     def polocm_step2(
         trace_PO_matrix_overall,
         obj_trace_PO_matrix_overall,
-        LP_var_type = "trace",
         debug = False
         ):
 
         PO_matrix_with_vars = obj_trace_PO_matrix_overall.copy()
-        prob = pl.LpProblem(LP_var_type + "_var_assignments", sense=pl.LpMinimize)
+        prob = pl.LpProblem("polocm", sense=pl.LpMinimize)
         PO_vars_overall= []
-        if (LP_var_type == "trace"):
             
-            for trace_no, matrix in enumerate(trace_PO_matrix_overall):
-                PO_vars = {}
-                
-                cols = matrix.columns.tolist()
-                for i in range(len(matrix)):
-                    for j in range(i+1,len(matrix)):
-                        if pd.isna(matrix.iloc[i,j]) or matrix.iloc[i,j] == np.nan:
-                            var_name = f"t_{trace_no}_{repr(cols[i])}_{repr(cols[j])}"
-                            var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
-                            PO_vars[(cols[i], cols[j])] = var 
-                            matrix.iloc[i,j] = (cols[i], cols[j])
-
-                            transpose_var_name = f"t_{trace_no}_{repr(cols[j])}_{repr(cols[i])}"
-                            transpose_var = pl.LpVariable(transpose_var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
-                            PO_vars[(cols[j], cols[i])] = transpose_var 
-                            matrix.iloc[j,i] = (cols[j], cols[i])
-
-                            prob += var == 1 - transpose_var # (i,j) == not (j,i)
-           
-                PO_vars_overall.append(PO_vars)
+        for trace_no, matrix in enumerate(trace_PO_matrix_overall):
+            PO_vars = {}
             
-            for trace_no, matrices in enumerate(PO_matrix_with_vars):
-                
-                PO_vars = PO_vars_overall[trace_no]
-                for obj, matrix in matrices.items():
-                    
-                    for row_header, row in matrix.iterrows():
-                        for col_header, val in row.items():
-                            key = (row_header.toIndexedAction(), col_header.toIndexedAction())
-                            if key in PO_vars.keys():
-                                matrix.at[row_header, col_header] = key
-                   
+            cols = matrix.columns.tolist()
+            for i in range(len(matrix)):
+                for j in range(i+1,len(matrix)):
+                    if pd.isna(matrix.iloc[i,j]) or matrix.iloc[i,j] == np.nan:
+                        var_name = f"t_{trace_no}_{repr(cols[i])}_{repr(cols[j])}"
+                        var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
+                        PO_vars[(cols[i], cols[j])] = var 
+                        matrix.iloc[i,j] = (cols[i], cols[j])
 
-            # TODO: updating the obj trace matrix?
+                        transpose_var_name = f"t_{trace_no}_{repr(cols[j])}_{repr(cols[i])}"
+                        transpose_var = pl.LpVariable(transpose_var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
+                        PO_vars[(cols[j], cols[i])] = transpose_var 
+                        matrix.iloc[j,i] = (cols[j], cols[i])
 
-        elif (LP_var_type == "obj_trace"):
-            for trace_no, matrices in enumerate(PO_matrix_with_vars):
-                PO_vars = {}
-                for obj, matrix in matrices.items():
-                    for row_header, row in matrix.iterrows():
-                        for col_header, val in row.items():
-                            var_name= f"ot_{trace_no}_{repr(row_header)}_{repr(col_header)}"
-                            var = pl.LpVariable(var_name, cat=pl.LpBinary, upBound=1, lowBound=0) 
-                            PO_vars[(row_header, col_header)] = var 
-                            matrix.at[row_header, col_header] = (row_header, col_header)
+                        prob += var == 1 - transpose_var # (i,j) == not (j,i)
+        
             PO_vars_overall.append(PO_vars)
+        
+        for trace_no, matrices in enumerate(PO_matrix_with_vars):
+            
+            PO_vars = PO_vars_overall[trace_no]
+            for obj, matrix in matrices.items():
+                
+                for row_header, row in matrix.iterrows():
+                    for col_header, val in row.items():
+                        key = (row_header.toIndexedAction(), col_header.toIndexedAction())
+                        if key in PO_vars.keys():
+                            matrix.at[row_header, col_header] = key
+                   
 
         # adding constraints on transitivity
         for trace_no, matrices in enumerate(PO_matrix_with_vars):
@@ -830,18 +843,14 @@ class POLOCM:
     ):
         prob += pl.lpSum(var for var_list in sort_AP_vars.values() for var in var_list.values())
 
-        num_vars = len(prob.variables())
-        num_constraints = len(prob.constraints)
-        
         try:
             prob.solve(solver)
         except Exception as e:
             raise InvalidMLPTask(str(e), num_vars, num_constraints)
         solution = {var.name: var.varValue for var in prob.variables()}
-        status = pl.LpStatus[prob.status]
         if debug:
 
-            print("Status: ", status)
+            print("Status: ", pl.LpStatus[prob.status])
             print()
 
             print("Solution:")
@@ -852,7 +861,7 @@ class POLOCM:
             print(pl.value(prob.objective))
             print()
         
-        return solution, num_vars, num_constraints
+        return solution
 
     @staticmethod
     def polocm_step6(
