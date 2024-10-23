@@ -621,8 +621,21 @@ class POLOCM:
                         matrix.iloc[j,i] = (cols[j], cols[i])
 
                         prob += var == 1 - transpose_var # (i,j) == not (j,i)
-        
+            
             PO_vars_overall.append(PO_vars)
+            for i in range(len(matrix)):
+                for j in range(i+1,len(matrix)):
+                    current = PO_vars.get(matrix.iloc[i,j], matrix.iloc[i,j])
+                    for x in range(len(matrix)):
+                        if (x==i or x ==j):
+                            continue
+                        _next = PO_vars.get(matrix.iloc[j,x], matrix.iloc[j,x])
+                        target = PO_vars.get(matrix.iloc[i, x],matrix.iloc[i, x])
+                        if (isinstance(current, pl.LpVariable) or isinstance(_next, pl.LpVariable)):
+                            prob += target >= current + _next -1
+                            prob += target <= current + _next
+        
+            
         
         for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
             
@@ -637,21 +650,21 @@ class POLOCM:
                    
 
         # adding constraints on transitivity
-        for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
-            PO_vars = PO_vars_overall[trace_no]
-            for obj, matrix in matrices.items():
-                for i in range(len(matrix)):
-                    for j in range(i+1, len(matrix)):
-                        current = PO_vars.get(matrix.iloc[i,j], matrix.iloc[i,j])
-                        for x in range(len(matrix)):
-                            if (x==i or x ==j):
-                                continue
+        # for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
+        #     PO_vars = PO_vars_overall[trace_no]
+        #     for obj, matrix in matrices.items():
+        #         for i in range(len(matrix)):
+        #             for j in range(i+1, len(matrix)):
+        #                 current = PO_vars.get(matrix.iloc[i,j], matrix.iloc[i,j])
+        #                 for x in range(len(matrix)):
+        #                     if (x==i or x ==j):
+        #                         continue
                             
-                            _next = PO_vars.get(matrix.iloc[j,x], matrix.iloc[j,x])
-                            target = PO_vars.get(matrix.iloc[i, x],matrix.iloc[i, x])
-                            if (isinstance(current, pl.LpVariable) or isinstance(_next, pl.LpVariable)):
-                                prob += target >= current + _next -1 # a>b, b>c, then a>c
-                                prob += target <= current + _next  # a<b. b<c, then a<c
+        #                     _next = PO_vars.get(matrix.iloc[j,x], matrix.iloc[j,x])
+        #                     target = PO_vars.get(matrix.iloc[i, x],matrix.iloc[i, x])
+        #                     if (isinstance(current, pl.LpVariable) or isinstance(_next, pl.LpVariable)):
+        #                         prob += target >= current + _next -1 # a>b, b>c, then a>c
+        #                         prob += target <= current + _next  # a<b. b<c, then a<c
 
                                     
         if debug:
