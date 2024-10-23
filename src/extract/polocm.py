@@ -267,6 +267,7 @@ class POLOCM:
         time_limit= (None, None, None),
         prob_type = 'polocm',
         solver_path = 'default',
+        cores = 1,
         debug: Union[bool, Dict[str, bool], List[str]] = False,
     ):
         """Creates a new Model object.
@@ -311,13 +312,15 @@ class POLOCM:
 
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
+
         
-        if solver_path == 'default':
-            solver = pl.PULP_CBC_CMD(msg=False, timeLimit=600)
-        else:
-            solver = pl.CPLEX_CMD(path=solver_path, msg=False, timeLimit=600)
         
         if prob_type == 'polocm':
+            if solver_path == 'default':
+                solver = pl.PULP_CBC_CMD(msg=False, timeLimit=600)
+            else:
+                print(f"launching cplex with {cores} cores")
+                solver = pl.CPLEX_CMD(path=solver_path, msg=False, timeLimit=600, threads=cores)
             return POLOCM.polocm(sorts, obs_tracelist, time_limit, solver, debug)
         elif prob_type == 'locm2':
             return POLOCM.locm2(sorts, obs_tracelist, time_limit, debug)

@@ -18,7 +18,9 @@ import datetime
 import random
 
 DEBUG = False
+MP = False
 SOLVER = "default"
+CORES = 4
 
 lock= Lock()
 
@@ -110,7 +112,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                 domain_filename=f"{domain}_{index}_{learning_obj['id']}_dod{dod}",
                 output_dir=output_dir,
                 time_limit=time_limit,
-                verbose=verbose
+                verbose=verbose,
             )
     except GeneralTimeOut as t:
         runtime, accuracy_val, executability, result = tuple(i * 2 for i in time_limit), 0, 0, f"Timeout: {t}"
@@ -147,13 +149,13 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
 
     return result_data
 
-def experiment(input_filepath, output_dir, dod, measurement, cores=8, time_limit=[600, 600, 300], seed=None, verbose=False):
+def experiment(input_filepath, output_dir, dod, measurement, time_limit=[600, 600, 300], seed=None, verbose=False):
     log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_filepath = os.path.join("./logs", log_filename)
     logger = setup_logger(log_filepath)
 
     logger.info("Experiment Start...")
-    logger.info(f"Using {cores} cores for parallel processing.")
+    logger.info(f"Using {CORES} cores for parallel processing.")
     logger.info(f"Reading data from {input_filepath}...")
     with open(input_filepath, 'r') as file:
         data = json.load(file)
@@ -170,9 +172,14 @@ def experiment(input_filepath, output_dir, dod, measurement, cores=8, time_limit
     if DEBUG:
         tasks = random.sample(tasks, 15)
 
-    with Pool(processes=cores) as pool:
-        pool.starmap_async(run_single_experiment, tasks).get()
-
+    if MP:
+        logger.info("Running experiment in multiprocessing...")
+        with Pool(processes=CORES) as pool:
+            pool.starmap_async(run_single_experiment, tasks).get()
+    else:
+        logger.info("Running experiment in sequential...")
+        for task in tasks:
+            run_single_experiment(*task)
     logger.info("Experiment completed.")
 
 def write_result_to_csv(output_dir,dod, result_data, logger):
@@ -196,7 +203,7 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
 def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
-        model, AP, runtime = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm')
+        model, AP, runtime = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm', cores=CORES)
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -332,7 +339,7 @@ def clear_output(output_dir):
 
 
 def main(args):
-    global SOLVER, DEBUG
+    global SOLVER, DEBUG, MP, CORES
     input_filepath = args.i
     output_dir = args.o
     seed = args.s
@@ -341,9 +348,13 @@ def main(args):
     time_limit = args.l
     cplex_dir = args.cplex
     debug = args.debug
+    mp = args.mp
     if debug:
         DEBUG = True
-
+    if mp:
+        MP = True
+    if cores:
+        CORES = cores
     dods = [0, 0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
     if dod not in dods:
         print(f"Invalid dod {dod}. Choose from {dods}")
@@ -395,7 +406,7 @@ def main(args):
         time_limit = [600,600,300]
 
     
-    experiment(input_filepath,output_dir, dod, 'flex', cores= cores,time_limit=time_limit, seed= seed,verbose=False)
+    experiment(input_filepath,output_dir, dod, 'flex',time_limit=time_limit, seed= seed,verbose=False)
 
 
 if __name__ == "__main__":
@@ -408,5 +419,6 @@ if __name__ == "__main__":
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
     parser.add_argument('--debug', action='store_true', help='Debug mode')
+    parser.add_argument('--mp', action='store_true', help='Enable multiprocessing')
     args = parser.parse_args()
     main(args)
