@@ -18,9 +18,9 @@ import datetime
 import random
 
 DEBUG = False
-MP = False
 SOLVER = "default"
-CORES = 4
+ET:int = 2
+CT:int = 4
 
 lock= Lock()
 
@@ -155,7 +155,7 @@ def experiment(input_filepath, output_dir, dod, measurement, time_limit=[600, 60
     logger = setup_logger(log_filepath)
 
     logger.info("Experiment Start...")
-    logger.info(f"Using {CORES} cores for parallel processing.")
+    logger.info(f"Using {ET} threads for parallel processing.")
     logger.info(f"Reading data from {input_filepath}...")
     with open(input_filepath, 'r') as file:
         data = json.load(file)
@@ -172,9 +172,9 @@ def experiment(input_filepath, output_dir, dod, measurement, time_limit=[600, 60
     if DEBUG:
         tasks = random.sample(tasks, 15)
 
-    if MP:
+    if ET > 1:
         logger.info("Running experiment in multiprocessing...")
-        with Pool(processes=CORES) as pool:
+        with Pool(processes=ET) as pool:
             pool.starmap_async(run_single_experiment, tasks).get()
     else:
         logger.info("Running experiment in sequential...")
@@ -203,7 +203,7 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
 def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit , verbose=False):
     try: 
         remark = []
-        model, AP, runtime = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm', cores=CORES)
+        model, AP, runtime = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm', cores=CT)
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -339,33 +339,29 @@ def clear_output(output_dir):
 
 
 def main(args):
-    global SOLVER, DEBUG, MP, CORES
+    global SOLVER, DEBUG, ET, CT
     input_filepath = args.i
     output_dir = args.o
     seed = args.s
-    cores = args.c
+    experiment_threads = args.et
+    cplex_threads = args.ct
     dod = args.d
     time_limit = args.l
     cplex_dir = args.cplex
     debug = args.debug
-    mp = args.mp
     if debug:
         DEBUG = True
-    if mp:
-        MP = True
-    if cores:
-        CORES = cores
+    if experiment_threads:
+        ET = experiment_threads
+    if cplex_threads:
+        CT = cplex_threads
     dods = [0, 0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
     if dod not in dods:
         print(f"Invalid dod {dod}. Choose from {dods}")
         return
 
-    if cores < 1:
-        print("Invalid number of cores. Choose a number greater than 0")
-        return
-    
-    if cores > os.cpu_count():
-        print(f"Number of cores {cores} is greater than available cores {os.cpu_count()}")
+    if ET < 1 or CT <1:
+        print("Invalid number of threads. Choose a number greater than 0")
         return
 
     if not os.path.exists(cplex_dir):
@@ -415,10 +411,10 @@ if __name__ == "__main__":
     parser.add_argument('--o', type=str, help='Output directory')
     parser.add_argument('--d', type=float, default=0, help='dod')
     parser.add_argument('--s', type=int, default=42, help='Rand seed')
-    parser.add_argument('--c', type=int, default=8, help='Number of cores')
+    parser.add_argument('--et', type=int, default=2, help='Number of threads for experiment')
     parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
+    parser.add_argument('--ct', type=int, default=4, help='Number of threads for cplex')
     parser.add_argument('--debug', action='store_true', help='Debug mode')
-    parser.add_argument('--mp', action='store_true', help='Enable multiprocessing')
     args = parser.parse_args()
     main(args)
