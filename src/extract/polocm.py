@@ -12,6 +12,7 @@ import numpy as np
 import time
 import pandas as pd
 import itertools
+import logging
 
 from traces import Action, PlanningObject
 
@@ -252,6 +253,8 @@ Bindings = Dict[FSM, Dict[int, List[Binding]]]  # {FSM: {state: [Binding]}}
 
 Statics = Dict[str, List[str]]  # {action: [static preconditions]}
 
+LOGGER: Optional[logging.Logger] = None
+
 class POLOCM:
     """LOCM"""
 
@@ -264,10 +267,10 @@ class POLOCM:
         statics: Optional[Statics] = None,
         viz: bool = False,
         view: bool = False,
-        time_limit= (None, None, None),
         prob_type = 'polocm',
         solver_path = 'default',
         cores = 1,
+        logger = None,
         debug: Union[bool, Dict[str, bool], List[str]] = False,
     ):
         """Creates a new Model object.
@@ -290,6 +293,7 @@ class POLOCM:
             IncompatibleObservationToken:
                 Raised if the observations are not identity observation.
         """
+        global LOGGER
         if prob_type == "polocm" and obs_tracelist.type is not PartialOrderedActionObservation:
             raise IncompatibleObservationToken(obs_tracelist.type, 'polocm')
         if prob_type == "locm2" and obs_tracelist.type is not ActionObservation:
@@ -304,15 +308,14 @@ class POLOCM:
         else:
             debug = defaultdict(lambda: False)
 
-        if (len(time_limit)!=3):
-            raise Exception("Invalid Time Limit")
-
         if (sorts is None):
             sorts = POLOCM._get_sorts(obs_tracelist, debug["sorts"])
 
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
 
+        if logger:
+            LOGGER = logger
         
         
         if prob_type == 'polocm':
@@ -321,37 +324,37 @@ class POLOCM:
             else:
                 print(f"launching cplex with {cores} cores")
                 solver = pl.CPLEX_CMD(path=solver_path, msg=False, timeLimit=600, threads=cores)
-            return POLOCM.polocm(sorts, obs_tracelist, time_limit, solver, debug)
+            return POLOCM.polocm(sorts, obs_tracelist, solver, debug)
         elif prob_type == 'locm2':
-            return POLOCM.locm2(sorts, obs_tracelist, time_limit, debug)
+            return POLOCM.locm2(sorts, obs_tracelist, debug)
         else:
-            return None
+            return None, None, None
 
     @staticmethod
-    def polocm(sorts, obs_tracelist, time_limit, solver, debug):
-        
-        @set_timer_throw_exc(num_seconds=time_limit[0], exception=POLOCMTimeOut, max_time=time_limit[0], stage='polocm')
-        def _polocm():
+    @set_timer_throw_exc(num_seconds=600, exception=POLOCMTimeOut, max_time=600, stage='polocm')
+    def polocm(sorts, obs_tracelist, solver, debug):
+        try:
+            start = time.time()
             trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
-            prob, PO_vars_overall, PO_matrix_with_vars = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall, debug['pstep2'])
-            prob, FO_vars_overall, FO_matrix_with_vars = POLOCM.polocm_step3(prob,PO_vars_overall, PO_matrix_with_vars, obj_trace_FO_matrix_overall, debug['pstep3'])
-            prob, sort_transition_matrix, sort_AP_vars = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, FO_matrix_with_vars, debug['pstep4'])
+            prob, PO_vars_overall = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall, debug['pstep2'])
+            prob, FO_vars_overall = POLOCM.polocm_step3(prob,PO_vars_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, debug['pstep3'])
+            prob, sort_transition_matrix, sort_AP_vars = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, obj_trace_FO_matrix_overall, debug['pstep4'])
             solution = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
-            FO, APs, obj_traces_overall = POLOCM.polocm_step6(PO_matrix_with_vars, PO_vars_overall,FO_matrix_with_vars, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
-            return obj_traces_overall, APs, dependencies
-        
-        @set_timer_throw_exc(num_seconds=time_limit[1], exception=POLOCMTimeOut, max_time=time_limit[1], stage='locm2')
-        def _locm2(obj_traces_overall):
+            APs, obj_traces_overall = POLOCM.polocm_step6(obj_trace_PO_matrix_overall, PO_vars_overall,obj_trace_FO_matrix_overall, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
+            polocm_time = time.time() - start
+            if LOGGER:
+                LOGGER.info("MLP done...")
+
             AML = POLOCM._locm2_step0(obj_traces_overall, sorts, debug['2step0'])
             AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
             H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['3step3'])
             transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
             consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
-            return AML, S
-        
-        @set_timer_throw_exc(num_seconds=time_limit[2], exception=POLOCMTimeOut, max_time=time_limit[2], stage='locm')
-        def _locm(obj_traces_overall, S, AML, dependencies):
+            locm2_time = time.time() - start - polocm_time
+            if LOGGER:
+                LOGGER.info("LOCM2 done...")
+
             TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
             HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
             bindings = POLOCM._step4(HS, debug["step4"])
@@ -365,41 +368,34 @@ class POLOCM:
                 {},  # statics
                 debug["step7"],
             )
-            return fluents, actions, OS, ap_state_pointers, bindings
-        
-        try:
-            start = time.time()
-            obj_traces_overall, APs, dependencies = _polocm()
-            polocm_time = time.time() - start
-            print("MLP done...")
-            AML, S = _locm2(obj_traces_overall)
-            locm2_time = time.time() - start - polocm_time
-            fluents, actions, OS, ap_state_pointers, bindings = _locm(obj_traces_overall, S, AML, dependencies)
-            locm_time = time.time() - start - polocm_time - locm2_time
             model = Model(fluents, actions)
-        except IndexError as ie:
-            print("INDEX ERROR during polocm")
-            raise ie
+            locm_time = time.time() - start - polocm_time - locm2_time
+            if LOGGER:
+                LOGGER.info("LOCM done...")
+            
         except Exception as e:
-            raise e
-        
-      
+            if LOGGER:
+                LOGGER.exception(str(e))
+                raise Exception(str(e).replace(",", " "))
         return model, APs, (polocm_time, locm2_time, locm_time)
+      
+        
     
     @staticmethod
-    def locm2(sorts, obs_tracelist, time_limit, debug):
-        @set_timer_throw_exc(num_seconds=time_limit[1], exception=POLOCMTimeOut, max_time=time_limit[1], stage='locm2')
-        def _locm2():
+    @set_timer_throw_exc(num_seconds=600, exception=POLOCMTimeOut, max_time=600, stage='locm2')
+    def locm2(sorts, obs_tracelist, debug):
+        try:
+            start = time.time()
             AML, obj_traces_overall, dependencies = POLOCM._locm2_step1(obs_tracelist, sorts, debug['2step0'])
             AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
             H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['2step3'])
             transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
             consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
-            return AML, S, obj_traces_overall, dependencies
-        
-        @set_timer_throw_exc(num_seconds=time_limit[2], exception=POLOCMTimeOut, max_time=time_limit[2], stage='locm')
-        def _locm(obj_traces_overall, S, AML, dependencies):
+            locm2_time = time.time() - start
+            if LOGGER:
+                LOGGER.info("LOCM2 done...")
+      
             TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
             HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
             bindings = POLOCM._step4(HS, debug["step4"])
@@ -413,19 +409,17 @@ class POLOCM:
                 {},
                 debug["step7"],
             )
-            return fluents, actions
-
-        try:
-            start = time.time()
-            AML, S, obj_traces_overall, dependencies = _locm2()
-            locm2_time = time.time() - start
-            fluents, actions = _locm(obj_traces_overall, S, AML, dependencies)
-            locm_time = time.time() - start - locm2_time
             model = Model(fluents, actions)
+            locm_time = time.time() - start - locm2_time
+            if LOGGER:
+                LOGGER.info("LOCM done...")
+            
         except Exception as e:
-            raise e
+            if LOGGER:
+                LOGGER.exception(str(e))
+            raise Exception(str(e).replace(",", " "))
     
-        return model, (0, locm2_time, locm_time)
+        return model, AML, (0, locm2_time, locm_time)
         
     @staticmethod
     def _get_sorts(obs_tracelist: ObservedTraceList, debug=False) -> Sorts:
@@ -606,7 +600,6 @@ class POLOCM:
         debug = False
         ):
 
-        PO_matrix_with_vars = obj_trace_PO_matrix_overall.copy()
         prob = pl.LpProblem("polocm", sense=pl.LpMinimize)
         PO_vars_overall= []
             
@@ -631,7 +624,7 @@ class POLOCM:
         
             PO_vars_overall.append(PO_vars)
         
-        for trace_no, matrices in enumerate(PO_matrix_with_vars):
+        for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
             
             PO_vars = PO_vars_overall[trace_no]
             for obj, matrix in matrices.items():
@@ -644,7 +637,7 @@ class POLOCM:
                    
 
         # adding constraints on transitivity
-        for trace_no, matrices in enumerate(PO_matrix_with_vars):
+        for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
             PO_vars = PO_vars_overall[trace_no]
             for obj, matrix in matrices.items():
                 for i in range(len(matrix)):
@@ -669,30 +662,29 @@ class POLOCM:
                 pprint(PO_vars)
 
             printmd("## PO matrix with vars")
-            for trace_no, matrices in enumerate(PO_matrix_with_vars):
+            for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
                 printmd(f"### Trace {trace_no}")
                 for obj, matrix in matrices.items():
                     printmd(f"#### Obj {obj.name}")
                     print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
 
-        return prob, PO_vars_overall, PO_matrix_with_vars
+        return prob, PO_vars_overall
 
 
     @staticmethod
     def polocm_step3(
         prob,
         PO_vars_overall,
-        PO_matrix_with_vars,
+        obj_trace_PO_matrix_overall,
         obj_trace_FO_matrix_overall,
         debug= False
     ):
-        FO_matrix_with_vars = obj_trace_FO_matrix_overall.copy()
         FO_vars_overall = []
-        for trace_no, matrices in enumerate(PO_matrix_with_vars):
+        for trace_no, matrices in enumerate(obj_trace_PO_matrix_overall):
             FO_vars: Dict[PlanningObject, Dict[tuple, pl.LpVariable]] = defaultdict(dict)
             for obj, PO_matrix in matrices.items():
                 headers = PO_matrix.columns.tolist()
-                FO_matrix = FO_matrix_with_vars[trace_no][obj]
+                FO_matrix = obj_trace_FO_matrix_overall[trace_no][obj]
                 for i in range(len(PO_matrix)):
                     for j in range(len(PO_matrix)):
                         if i==j:
@@ -735,7 +727,7 @@ class POLOCM:
                                 prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO
                                
             FO_vars_overall.append(FO_vars)
-        for trace_no, matrices in enumerate(FO_matrix_with_vars):
+        for trace_no, matrices in enumerate(obj_trace_FO_matrix_overall):
             for obj, FO_matrix in matrices.items():
                 flatten = []
                 FO_vars = FO_vars_overall[trace_no][obj]
@@ -761,13 +753,13 @@ class POLOCM:
                 print(tabulate(FO_vars.items(), headers="keys", tablefmt="fancy_grid"))
 
             printmd("## FO matrix with vars")
-            for trace_no, matrices in enumerate(FO_matrix_with_vars):
+            for trace_no, matrices in enumerate(obj_trace_FO_matrix_overall):
                 printmd(f"### Trace {trace_no}")
                 for obj, matrix in matrices.items():
                     printmd(f"#### Obj {obj.name}")
                     print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
 
-        return prob, FO_vars_overall, FO_matrix_with_vars
+        return prob, FO_vars_overall
                                     
     @staticmethod
     def polocm_step4(
@@ -775,7 +767,7 @@ class POLOCM:
         sort_aps,
         sorts,
         FO_vars_overall,
-        FO_matrix_with_vars,
+        obj_trace_FO_matrix_overall,
         debug = False
     ):
         _sort_transition_matrix: Dict[int, pd.DataFrame] = defaultdict()
@@ -786,7 +778,7 @@ class POLOCM:
             _sort_transition_matrix[sort] = transition_matrix.copy()
             sort_transition_matrix[sort] = transition_matrix.copy()
         
-        for trace_no, matrices in enumerate(FO_matrix_with_vars):
+        for trace_no, matrices in enumerate(obj_trace_FO_matrix_overall):
             for obj, matrix in matrices.items():
                  cols = matrix.columns.tolist()
                  for i in range(len(matrix)):
@@ -849,7 +841,7 @@ class POLOCM:
         try:
             prob.solve(solver)
         except Exception as e:
-            raise InvalidMLPTask(str(e), num_vars, num_constraints)
+            raise InvalidMLPTask("Invalid MLP task")
         solution = {var.name: var.varValue for var in prob.variables()}
         if debug:
 
@@ -868,18 +860,18 @@ class POLOCM:
 
     @staticmethod
     def polocm_step6(
-        PO_matrix_with_vars,
+        obj_trace_PO_matrix_overall,
         PO_vars_overall,
-        FO_matrix_with_vars,
+        obj_trace_FO_matrix_overall,
         FO_vars_overall,
         sort_transition_matrix,
         AP_vars_overall,
         solution,
         debug= False
     ):
-        sol_PO_matrix = PO_matrix_with_vars.copy()
+        sol_PO_matrix = obj_trace_PO_matrix_overall.copy()
         obj_traces_overall = []
-        for trace_no, matrices, in enumerate(PO_matrix_with_vars):
+        for trace_no, matrices, in enumerate(obj_trace_PO_matrix_overall):
             obj_traces: Dict[PlanningObject, List[AP]] = defaultdict(list)
             for obj,PO_matrix in matrices.items():
                 sol = sol_PO_matrix[trace_no][obj]
@@ -893,22 +885,6 @@ class POLOCM:
                 sorted_header = sol.sum(axis=1).sort_values(ascending=False).index.tolist()
                 obj_traces[obj] = [iap.toAP() for iap in sorted_header]
             obj_traces_overall.append(obj_traces)
-
-        
-        sol_FO_matrix = FO_matrix_with_vars.copy()
-        for trace_no, matrices in enumerate(FO_matrix_with_vars):
-            for obj, FO_matrix in matrices.items():
-                sol = sol_FO_matrix[trace_no][obj]
-                for i in range(len(FO_matrix)):
-                    for j in range(len(FO_matrix)):
-                        if(isinstance(FO_matrix.iloc[i,j], tuple)):
-                            var = FO_vars_overall[trace_no][obj].get(FO_matrix.iloc[i,j])
-
-                            sol_var = solution[var.name]
-                            sol.iloc[i,j] = sol_var
-                
-                
-
         
         sol_AP_matrix = sort_transition_matrix.copy()
         for sort, matrix in sort_transition_matrix.items():
@@ -920,6 +896,17 @@ class POLOCM:
                         sol_var = solution[var.name]
                         sol_AP_matrix[sort].iloc[i,j]= sol_var
         if debug:
+            sol_FO_matrix = obj_trace_FO_matrix_overall.copy()
+            for trace_no, matrices in enumerate(obj_trace_FO_matrix_overall):
+                for obj, FO_matrix in matrices.items():
+                    sol = sol_FO_matrix[trace_no][obj]
+                    for i in range(len(FO_matrix)):
+                        for j in range(len(FO_matrix)):
+                            if(isinstance(FO_matrix.iloc[i,j], tuple)):
+                                var = FO_vars_overall[trace_no][obj].get(FO_matrix.iloc[i,j])
+
+                                sol_var = solution[var.name]
+                                sol.iloc[i,j] = sol_var
             printmd("## Solution FO matrix")
             for trace_no, matrices in enumerate(sol_FO_matrix):
                 printmd(f"### Trace {trace_no}")
@@ -932,7 +919,7 @@ class POLOCM:
                 printmd(f"### Sort {sort}")
                 print(tabulate(matrix, headers="keys", tablefmt="fancy_grid"))
 
-        return sol_FO_matrix, sol_AP_matrix, obj_traces_overall
+        return sol_AP_matrix, obj_traces_overall
 
     @staticmethod
     def _locm2_step0(

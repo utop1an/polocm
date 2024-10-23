@@ -42,7 +42,7 @@ def setup_logger(log_file):
 
     return logger
 
-def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger):
+def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verbose, logger):
     """Runs a single experiment given the necessary parameters."""
 
     domain = learning_obj['domain']
@@ -79,8 +79,8 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                 obs_tracelist,
                 domain_filename=f"{domain}_{index}_{learning_obj['id']}_dod{dod}",
                 output_dir=output_dir,
-                time_limit=time_limit,
-                verbose=verbose
+                verbose=verbose,
+                logger = logger
             )
             
         else:
@@ -111,11 +111,11 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
                 obs_tracelist,
                 domain_filename=f"{domain}_{index}_{learning_obj['id']}_dod{dod}",
                 output_dir=output_dir,
-                time_limit=time_limit,
                 verbose=verbose,
+                logger = logger
             )
     except GeneralTimeOut as t:
-        runtime, accuracy_val, executability, result = tuple(i * 2 for i in time_limit), 0, 0, f"Timeout: {t}"
+        runtime, accuracy_val, executability, result = (1200,0,0), 0, 0, f"Timeout"
     except Exception as e:
         runtime, accuracy_val, executability, result = (0, 0, 0), 0, 0, e
         logger.error(f"Error during experiment for domain {domain}: {e}")
@@ -149,7 +149,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, time_limit
 
     return result_data
 
-def experiment(input_filepath, output_dir, dod, measurement, time_limit=[600, 600, 300], seed=None, verbose=False):
+def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=False):
     log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_filepath = os.path.join("./logs", log_filename)
     logger = setup_logger(log_filepath)
@@ -166,7 +166,7 @@ def experiment(input_filepath, output_dir, dod, measurement, time_limit=[600, 60
 
     tasks = []
     for learning_obj in data:
-        tasks.append((output_dir, dod, learning_obj, measurement, time_limit, seed, verbose, logger))
+        tasks.append((output_dir, dod, learning_obj, measurement, seed, verbose, logger))
         
     
     if DEBUG:
@@ -199,11 +199,11 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
     logger.info(f"Results written to {csv_file_path}")
 
 
-@set_timer_throw_exc(num_seconds=1200, exception=GeneralTimeOut, max_time=1200, source="polocm")
-def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit , verbose=False):
+@set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="polocm")
+def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir , verbose=False, logger=None):
     try: 
         remark = []
-        model, AP, runtime = POLOCM(obs_po_tracelist, time_limit=time_limit, solver_path=SOLVER, prob_type='polocm', cores=CT)
+        model, AP, runtime = POLOCM(obs_po_tracelist, solver_path=SOLVER, prob_type='polocm', cores=CT, logger=logger )
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -221,7 +221,7 @@ def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, 
         if len(remark)==0:
             remark = ['Success']
     except POLOCMTimeOut as t:
-        return tuple(i*2 for i in time_limit), 0, 0,0, f"Timeout: {t}"
+        return (1200,0,0), 0, 0,0, f"Timeout"
     except Exception as e:
         print(f"Error: {e}")
         return (0,0,0), 0,0, 0, e
@@ -229,10 +229,10 @@ def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, 
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="locm2")
-def single_locm2(obs_tracelist: ObservedTraceList, domain_filename, output_dir, time_limit, verbose=False):
+def single_locm2(obs_tracelist: ObservedTraceList, domain_filename, output_dir, verbose=False, logger=None):
     try: 
         remark = []
-        model, runtime = POLOCM(obs_tracelist, prob_type="locm2", time_limit=time_limit)
+        model,_, runtime = POLOCM(obs_tracelist, prob_type="locm2", logger=logger)
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -244,7 +244,7 @@ def single_locm2(obs_tracelist: ObservedTraceList, domain_filename, output_dir, 
         if len(remark)==0:
             remark = ['Success']
     except POLOCMTimeOut as t:
-        return tuple(i*2 for i in time_limit), 0, 0, f"Timeout: {t}"
+        return (0,1200,0), 0, 0, f"Timeout"
     except Exception as e:
         print(f"Error: {e}")
         return (0,0,0), 0, 0, e
@@ -346,7 +346,6 @@ def main(args):
     experiment_threads = args.et
     cplex_threads = args.ct
     dod = args.d
-    time_limit = args.l
     cplex_dir = args.cplex
     debug = args.debug
     if debug:
@@ -389,20 +388,9 @@ def main(args):
     if not os.path.exists(pddl_dir):
         os.makedirs(pddl_dir)
 
-    if time_limit and len(time_limit) > 3:
-        print("Invalid time limit. Max length 3")
-        return
-
-    if len(time_limit) ==2:
-        time_limit.append(300)
-    elif len(time_limit) ==1:
-        time_limit.append(600)
-        time_limit.append(300)
-    elif len(time_limit) ==0:
-        time_limit = [600,600,300]
 
     
-    experiment(input_filepath,output_dir, dod, 'flex',time_limit=time_limit, seed= seed,verbose=False)
+    experiment(input_filepath,output_dir, dod, 'flex', seed= seed,verbose=False)
 
 
 if __name__ == "__main__":
@@ -412,7 +400,6 @@ if __name__ == "__main__":
     parser.add_argument('--d', type=float, default=0, help='dod')
     parser.add_argument('--s', type=int, default=42, help='Rand seed')
     parser.add_argument('--et', type=int, default=2, help='Number of threads for experiment')
-    parser.add_argument('--l', type=int, nargs="+",default=[600,600,300], help='Time limit, max length 3, for [polocm, locm2, locm] respectively')
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
     parser.add_argument('--ct', type=int, default=4, help='Number of threads for cplex')
     parser.add_argument('--debug', action='store_true', help='Debug mode')
