@@ -419,6 +419,7 @@ class POLOCM:
             raise Exception(str(e).replace(",", " "))
     
         return model, AML, (0, locm2_time, locm_time)
+
         
     @staticmethod
     def _get_sorts(obs_tracelist: ObservedTraceList, debug=False) -> Sorts:

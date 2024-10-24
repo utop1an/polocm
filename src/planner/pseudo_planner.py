@@ -1,4 +1,5 @@
 
+from math import e
 import pddl_parser
 import translate.normalize as normalize
 import os
@@ -70,7 +71,7 @@ class PseudoPlanner:
                 if debug:
                     print(f"action {op} not executable")
                     print("preconditions not satisfied: ", invalid)
-                    print("ending with executability: ", executability)
+
             # apply action
             adds = set(e for _,e in op.add_effects)
             dels = set(e for _,e in op.del_effects)
@@ -119,7 +120,7 @@ class PseudoPlanner:
             if(len(invalid)>0):
                 executability = i/len(action_sequence)
                 if debug:
-                    print(f"action {op} not executable")
+                    print(f"action {op.name} not executable")
                     print("preconditions not satisfied: ", invalid)
                     print("ending with executability: ", executability)
                 return executability
@@ -135,7 +136,12 @@ class PseudoPlanner:
 
           
             if debug:
-                print(f"action {op} executed")
+                print(f"{op.name}... executed")
+                print("adding:")
+                print([e for _,e in op.add_effects])
+                print("deleting:")
+                print([e for _,e in op.del_effects])
+                print()
         return 1
             
 

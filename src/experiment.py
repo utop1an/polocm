@@ -53,27 +53,28 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
 
     logger.info(f"Running {domain}-lo.{learning_obj['id']}-{dod} ...")
 
-    traces = []
-    for raw_trace in raw_traces:
-        steps = []
-        for i, raw_step in enumerate(raw_trace):
-            action_name = raw_step['action']
-            obj_names = raw_step['objs']
-            objs = []
-            for obj in obj_names:
-                obj_name, obj_type = obj.split("?")
-                objs.append(PlanningObject(obj_type, obj_name))
-            action = Action(action_name, objs)
-            step = Step(State(), action, i)
-            steps.append(step)
-        trace = Trace(steps)
-        traces.append(trace)
-
-    tracelist = TraceList(traces)
-    obs_tracelist = tracelist.tokenize(ActionObservation, ObservedTraceList)
-    actual_dod = 0
-    error_rate = 0
+    
     try:
+        traces = []
+        for raw_trace in raw_traces:
+            steps = []
+            for i, raw_step in enumerate(raw_trace):
+                action_name = raw_step['action']
+                obj_names = raw_step['objs']
+                objs = []
+                for obj in obj_names:
+                    obj_name, obj_type = obj.split("?")
+                    objs.append(PlanningObject(obj_type, obj_name))
+                action = Action(action_name, objs)
+                step = Step(State(), action, i)
+                steps.append(step)
+            trace = Trace(steps)
+            traces.append(trace)
+
+        tracelist = TraceList(traces)
+        obs_tracelist = tracelist.tokenize(ActionObservation, ObservedTraceList)
+        actual_dod = 0
+        error_rate = 0
         if dod == 0:
             runtime, accuracy_val, executability, result = single_locm2(
                 obs_tracelist,
@@ -143,7 +144,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         'executability': executability,
         'result': result
     }
-    write_result_to_csv(output_dir, dod, result_data, logger)
+    return result_data
 
 
 
@@ -158,8 +159,10 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
                 headers = result_data.keys()
                 csv_file.write(','.join(headers) + '\n')
 
-            values = [str(result_data[key]) for key in result_data.keys()]
-            csv_file.write(','.join(values) + '\n')
+            for data in result_data:
+
+                values = [str(data[key]) for key in data.keys()]
+                csv_file.write(','.join(values) + '\n')
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="polocm")
@@ -324,11 +327,15 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
     if ET > 1:
         logger.info("Running experiment in multiprocessing...")
         with Pool(processes=ET) as pool:
-            pool.starmap_async(run_single_experiment, tasks).get()
+            res= pool.starmap_async(run_single_experiment, tasks).get()
+            write_result_to_csv(output_dir, dod, res, logger)
     else:
         logger.info("Running experiment in sequential...")
+        res= []
         for task in tasks:
-            run_single_experiment(*task)
+            r= run_single_experiment(*task)
+            res.append(r)
+        write_result_to_csv(output_dir, dod, res, logger)
     logger.info("Experiment completed.")
 
 def main(args):
