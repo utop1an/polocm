@@ -1,5 +1,4 @@
 
-import glob
 from extract import POLOCM
 from traces import *
 from observation import *
@@ -51,6 +50,8 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
     total_length = learning_obj['total_length']
     raw_traces = learning_obj['traces']
     size = len(raw_traces)
+
+    logger.info(f"Running {domain}-lo.{learning_obj['id']}-{dod} ...")
 
     traces = []
     for raw_trace in raw_traces:
@@ -112,6 +113,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
                 logger=logger,
                 verbose=verbose
             )
+        clear_output(output_dir)
 
     except GeneralTimeOut as t:
         runtime, accuracy_val, executability, result = (1200,0,0), 0, 0, f"Timeout"
@@ -120,6 +122,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         logger.error(f"Error during experiment for domain {domain}: {e}")
 
     polocm_time, locm2_time, locm_time = runtime
+    logger.info(f"{domain}-lo.{learning_obj['id']}-{dod}  DONE")
 
     result_data = {
         'lo_id': learning_obj['id'],
@@ -140,15 +143,14 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         'executability': executability,
         'result': result
     }
-    # write_result_to_csv(output_dir, dod, result_data, logger)
-    return result_data
+    write_result_to_csv(output_dir, dod, result_data, logger)
+
 
 
 
 def write_result_to_csv(output_dir,dod, result_data, logger):
     """Writes the result data to a CSV file in a thread-safe manner."""
     csv_file_path = os.path.join(output_dir, f"results_{dod}.csv")
-    logger.info(f"Writing results to {csv_file_path}...")
     with lock:
         file_exists = os.path.exists(csv_file_path)
         with open(csv_file_path, 'a') as csv_file:
@@ -156,11 +158,8 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
                 headers = result_data.keys()
                 csv_file.write(','.join(headers) + '\n')
 
-            for data in result_data:
-                values = [str(data[key]) for key in data.keys()]
-                csv_file.write(','.join(values) + '\n')
-
-    logger.info(f"Results written done.")
+            values = [str(result_data[key]) for key in result_data.keys()]
+            csv_file.write(','.join(values) + '\n')
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="polocm")
@@ -325,17 +324,11 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
     if ET > 1:
         logger.info("Running experiment in multiprocessing...")
         with Pool(processes=ET) as pool:
-            res = pool.starmap_async(run_single_experiment, tasks).get()
+            pool.starmap_async(run_single_experiment, tasks).get()
     else:
         logger.info("Running experiment in sequential...")
-        res= []
         for task in tasks:
-            r = run_single_experiment(*task)
-            res.append(r)
-            
-    write_result_to_csv(output_dir, dod, res, logger)
-    clear_output(output_dir)
-
+            run_single_experiment(*task)
     logger.info("Experiment completed.")
 
 def main(args):
