@@ -5,7 +5,8 @@ from translate.normalize import normalize
 from utils import (
     set_timer_throw_exc,
     TraceSearchTimeOut,
-    GeneralTimeOut
+    GeneralTimeOut,
+    InvalidMLPTask,
 )
 
 class RandomPlanner:
@@ -21,9 +22,9 @@ class RandomPlanner:
             random.seed(self.seed)
         self.max_time = max_time
         try: 
-            self.initialize_initial_task()
+            self.initialize_task()
         except Exception as e:
-            raise InvalidModel(domain, e)
+            raise Exception(f"Invalid model {domain}, {problem}, {e}")
 
 
     @set_timer_throw_exc(num_seconds=30, exception=GeneralTimeOut, max_time=30, source="random planner")
