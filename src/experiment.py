@@ -1,4 +1,5 @@
 
+import glob
 from extract import POLOCM
 from traces import *
 from observation import *
@@ -123,7 +124,7 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         logger.error(f"Error during experiment for domain {domain}: {e}")
 
     polocm_time, locm2_time, locm_time = runtime
-    logger.info(f"{domain}-lo.{learning_obj['id']}-{dod}  Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
+    logger.info(f"{domain}-lo.{learning_obj['id']}-{dod}  DONE!")
 
     result_data = {
         'lo_id': learning_obj['id'],
@@ -144,8 +145,8 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         'executability': executability,
         'result': result
     }
-    write_result_to_csv(output_dir, dod, result_data, logger)
-
+    # write_result_to_csv(output_dir, dod, result_data, logger)
+    return result_data
 
 
 
@@ -160,8 +161,9 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
                 headers = result_data.keys()
                 csv_file.write(','.join(headers) + '\n')
 
-            values = [str(result_data[key]) for key in result_data.keys()]
-            csv_file.write(','.join(values) + '\n')
+            for data in result_data:
+                values = [str(data[key]) for key in data.keys()]
+                csv_file.write(','.join(values) + '\n')
 
     logger.info(f"Results written done.")
 
@@ -335,11 +337,15 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
     if ET > 1:
         logger.info("Running experiment in multiprocessing...")
         with Pool(processes=ET) as pool:
-            pool.starmap_async(run_single_experiment, tasks).get()
+            res = pool.starmap_async(run_single_experiment, tasks).get()
     else:
         logger.info("Running experiment in sequential...")
+        res= []
         for task in tasks:
-            run_single_experiment(*task)
+            r = run_single_experiment(*task)
+            res.append(r)
+            
+    write_result_to_csv(output_dir, dod, res, logger)
     logger.info("Experiment completed.")
 
 def main(args):
