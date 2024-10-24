@@ -111,9 +111,11 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
                 obs_tracelist,
                 domain_filename=f"{domain}_{index}_{learning_obj['id']}_dod{dod}",
                 output_dir=output_dir,
-                verbose=verbose,
-                logger = logger
+                logger=logger,
+                verbose=verbose
             )
+        clear_output(output_dir)
+
     except GeneralTimeOut as t:
         runtime, accuracy_val, executability, result = (1200,0,0), 0, 0, f"Timeout"
     except Exception as e:
@@ -122,8 +124,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
 
     polocm_time, locm2_time, locm_time = runtime
     logger.info(f"{domain}-lo.{learning_obj['id']}-{dod}  Runtime: {runtime}, Accuracy: {accuracy_val}, Executability: {executability}")
-
-    clear_output(output_dir)
 
     result_data = {
         'lo_id': learning_obj['id'],
@@ -144,48 +144,15 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         'executability': executability,
         'result': result
     }
-
     write_result_to_csv(output_dir, dod, result_data, logger)
 
-    return result_data
 
-def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=False):
-    log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    log_filepath = os.path.join("./logs", log_filename)
-    logger = setup_logger(log_filepath)
 
-    logger.info("Experiment Start...")
-    logger.info(f"Using {ET} threads for parallel processing.")
-    logger.info(f"Reading data from {input_filepath}...")
-    with open(input_filepath, 'r') as file:
-        data = json.load(file)
-
-    if seed:
-        logger.info(f"Setting seed to {seed}")
-        random.seed(seed)
-
-    tasks = []
-    for learning_obj in data:
-        tasks.append((output_dir, dod, learning_obj, measurement, seed, verbose, logger))
-        
-    
-    if DEBUG:
-        tasks = random.sample(tasks, 15)
-
-    if ET > 1:
-        logger.info("Running experiment in multiprocessing...")
-        with Pool(processes=ET) as pool:
-            pool.starmap_async(run_single_experiment, tasks).get()
-    else:
-        logger.info("Running experiment in sequential...")
-        for task in tasks:
-            run_single_experiment(*task)
-    logger.info("Experiment completed.")
 
 def write_result_to_csv(output_dir,dod, result_data, logger):
     """Writes the result data to a CSV file in a thread-safe manner."""
     csv_file_path = os.path.join(output_dir, f"results_{dod}.csv")
-
+    logger.info(f"Writing results to {csv_file_path}...")
     with lock:
         file_exists = os.path.exists(csv_file_path)
         with open(csv_file_path, 'a') as csv_file:
@@ -196,28 +163,33 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
             values = [str(result_data[key]) for key in result_data.keys()]
             csv_file.write(','.join(values) + '\n')
 
-    logger.info(f"Results written to {csv_file_path}")
+    logger.info(f"Results written done.")
 
 
 @set_timer_throw_exc(num_seconds=600, exception=GeneralTimeOut, max_time=600, source="polocm")
-def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir , verbose=False, logger=None):
+def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir ,logger, verbose=False):
     try: 
         remark = []
         model, AP, runtime = POLOCM(obs_po_tracelist, solver_path=SOLVER, prob_type='polocm', cores=CT, logger=logger )
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
+        logger.info(f"Writing PDDL files to {file_path} and {tmp_file_path}")
         model.to_pddl(domain_filename, domain_filename=file_path, problem_filename=tmp_file_path)
+        logger.info("writing done")
 
+        logger.info("Getting AP accuracy")
         sorts = POLOCM._get_sorts(obs_tracelist)
         AML, _, __ = POLOCM._locm2_step1(obs_tracelist, sorts)
         accuracy_val,error_rate, r = get_AP_accuracy(AP, AML, verbose=verbose)
         if (r):
             remark.append(r)
+        logger.info(f"Accuracy: {accuracy_val}, Error Rate: {error_rate}")
+        logger.info("Checking executability")
         executabililty, r = get_executability(obs_tracelist, domain_filename=file_path)
-        
         if r:
             remark.append(r)
+        logger.info(f"Executability: {executabililty}")
         if len(remark)==0:
             remark = ['Success']
     except POLOCMTimeOut as t:
@@ -337,6 +309,38 @@ def clear_output(output_dir):
             print(f"Failed to delete {file_path}. Reason: {e}")
 
 
+def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=False):
+    log_filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filepath = os.path.join("./logs", log_filename)
+    logger = setup_logger(log_filepath)
+
+    logger.info("Experiment Start...")
+    logger.info(f"Using {ET} threads for parallel processing.")
+    logger.info(f"Reading data from {input_filepath}...")
+    with open(input_filepath, 'r') as file:
+        data = json.load(file)
+
+    if seed:
+        logger.info(f"Setting seed to {seed}")
+        random.seed(seed)
+
+    tasks = []
+    for learning_obj in data:
+        tasks.append((output_dir, dod, learning_obj, measurement, seed, verbose, logger))
+        
+    
+    if DEBUG:
+        tasks = random.sample(tasks, 15)
+
+    if ET > 1:
+        logger.info("Running experiment in multiprocessing...")
+        with Pool(processes=ET) as pool:
+            pool.starmap_async(run_single_experiment, tasks).get()
+    else:
+        logger.info("Running experiment in sequential...")
+        for task in tasks:
+            run_single_experiment(*task)
+    logger.info("Experiment completed.")
 
 def main(args):
     global SOLVER, DEBUG, ET, CT

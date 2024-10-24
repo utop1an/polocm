@@ -3,8 +3,8 @@
 #SBATCH --mail-type=END,FAIL          # Mail events (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user=u6797221@anu.edu.au     # Where to send mail
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=48G
 #SBATCH --time=120:00:00
 #SBATCH --partition=normal
 #SBATCH --qos=normal
@@ -23,11 +23,12 @@ for dod in 0.6 0.7 0.8 0.9 1; do
         -B ~/xLOCM/logs:/logs \
         -B ~/xLOCM/output/:/output \
         ~/xLOCM/polocm.sif python3 /src/experiment.py --i ./data/traces_plan_r1.json --o ./output \
-        --c 8 \
+        --ct 10 --et 1 \
         --d $dod \
         --cplex /opt/cplex/cplex/bin/x86-64_linux/cplex
 
     echo "Completed task with --d=$dod"
+    sacct -j $SLURM_JOB_ID --format=JobID,JobName,MaxRSS,MaxVMSize,State,Elapsed >> 1_$SLURM_JOB_ID_polocm.log
 done
 
 echo "--- done ---"
