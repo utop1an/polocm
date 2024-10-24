@@ -52,8 +52,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
     raw_traces = learning_obj['traces']
     size = len(raw_traces)
 
-    logger.info(f"Running experiment for domain {domain} with DOD {dod}...")
-
     traces = []
     for raw_trace in raw_traces:
         steps = []
@@ -106,7 +104,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
             po_tracelist = TraceList(po_traces)
             obs_po_tracelist = po_tracelist.tokenize(PartialOrderedActionObservation, ObservedPartialOrderTraceList)
 
-            logger.info(f"Running POLOCM for domain {domain}...")
             runtime, accuracy_val,error_rate, executability, result = single(
                 obs_po_tracelist,
                 obs_tracelist,
@@ -115,7 +112,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
                 logger=logger,
                 verbose=verbose
             )
-        clear_output(output_dir)
 
     except GeneralTimeOut as t:
         runtime, accuracy_val, executability, result = (1200,0,0), 0, 0, f"Timeout"
@@ -124,7 +120,6 @@ def run_single_experiment(output_dir, dod, learning_obj, measurement, seed, verb
         logger.error(f"Error during experiment for domain {domain}: {e}")
 
     polocm_time, locm2_time, locm_time = runtime
-    logger.info(f"{domain}-lo.{learning_obj['id']}-{dod}  DONE!")
 
     result_data = {
         'lo_id': learning_obj['id'],
@@ -176,22 +171,16 @@ def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, 
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
-        logger.info(f"Writing PDDL files to {file_path} and {tmp_file_path}")
         model.to_pddl(domain_filename, domain_filename=file_path, problem_filename=tmp_file_path)
-        logger.info("writing done")
 
-        logger.info("Getting AP accuracy")
         sorts = POLOCM._get_sorts(obs_tracelist)
         AML, _, __ = POLOCM._locm2_step1(obs_tracelist, sorts)
         accuracy_val,error_rate, r = get_AP_accuracy(AP, AML, verbose=verbose)
         if (r):
             remark.append(r)
-        logger.info(f"Accuracy: {accuracy_val}, Error Rate: {error_rate}")
-        logger.info("Checking executability")
         executabililty, r = get_executability(obs_tracelist, domain_filename=file_path)
         if r:
             remark.append(r)
-        logger.info(f"Executability: {executabililty}")
         if len(remark)==0:
             remark = ['Success']
     except POLOCMTimeOut as t:
@@ -318,7 +307,6 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
 
     logger.info("Experiment Start...")
     logger.info(f"Using {ET} threads for parallel processing.")
-    logger.info(f"Reading data from {input_filepath}...")
     with open(input_filepath, 'r') as file:
         data = json.load(file)
 
@@ -346,6 +334,8 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
             res.append(r)
             
     write_result_to_csv(output_dir, dod, res, logger)
+    clear_output(output_dir)
+
     logger.info("Experiment completed.")
 
 def main(args):
