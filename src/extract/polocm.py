@@ -342,8 +342,7 @@ class POLOCM:
             solution = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
             APs, obj_traces_overall = POLOCM.polocm_step6(obj_trace_PO_matrix_overall, PO_vars_overall,obj_trace_FO_matrix_overall, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
             polocm_time = time.time() - start
-            if LOGGER:
-                LOGGER.info("MLP done...")
+          
 
             AML = POLOCM._locm2_step0(obj_traces_overall, sorts, debug['2step0'])
             AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
@@ -352,8 +351,7 @@ class POLOCM:
             consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
             locm2_time = time.time() - start - polocm_time
-            if LOGGER:
-                LOGGER.info("LOCM2 done...")
+        
 
             TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
             HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
@@ -370,8 +368,7 @@ class POLOCM:
             )
             model = Model(fluents, actions)
             locm_time = time.time() - start - polocm_time - locm2_time
-            if LOGGER:
-                LOGGER.info("LOCM done...")
+         
             
         except Exception as e:
             if LOGGER:
@@ -393,8 +390,7 @@ class POLOCM:
             consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
             locm2_time = time.time() - start
-            if LOGGER:
-                LOGGER.info("LOCM2 done...")
+          
       
             TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
             HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
@@ -411,8 +407,7 @@ class POLOCM:
             )
             model = Model(fluents, actions)
             locm_time = time.time() - start - locm2_time
-            if LOGGER:
-                LOGGER.info("LOCM done...")
+          
             
         except Exception as e:
             if LOGGER:
