@@ -4,6 +4,7 @@ from .model import Model, LearnedAction
 from .exceptions import IncompatibleObservationToken
 from .model import Model
 from .polocm import POLOCM
+from .locm import LOCM
 
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "LearnedLiftedFluent",
     "Model",
     "IncompatibleObservationToken",
-    "POLOCM"
+    "POLOCM",
+    "LOCM",
 ]
