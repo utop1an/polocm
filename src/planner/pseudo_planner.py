@@ -57,6 +57,9 @@ class PseudoPlanner:
             if ('sort0' in param_types):
                 index= param_types.index('sort0')
                 params.insert(index, 'zero')
+            elif ('zero' in param_types):
+                index= param_types.index('zero')
+                params.insert(index, 'zero')
             var_mapping = dict(zip(param_names, params))
             objects_by_type = dict(zip(params, param_types))
             op = action.instantiate(var_mapping,None, None,None, objects_by_type,None)
