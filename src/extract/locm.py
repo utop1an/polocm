@@ -240,19 +240,23 @@ class LOCM:
             pprint(sortid2objs)
             print("\n")
 
-        TS, ap_state_pointers, OS = LOCM._step1(obs_trace, sorts, debug["step1"])
-        HS = LOCM._step3(TS, ap_state_pointers, OS, sorts, debug["step3"])
-        bindings = LOCM._step4(HS, debug["step4"])
-        bindings = LOCM._step5(HS, bindings, debug["step5"])
-        fluents, actions = LOCM._step7(
-            OS,
-            ap_state_pointers,
-            sorts,
-            bindings,
-            statics if statics is not None else {},
-            debug["step7"],
-            viz,
-        )
+        try:
+            TS, ap_state_pointers, OS = LOCM._step1(obs_trace, sorts, debug["step1"])
+            HS = LOCM._step3(TS, ap_state_pointers, OS, sorts, debug["step3"])
+            bindings = LOCM._step4(HS, debug["step4"])
+            bindings = LOCM._step5(HS, bindings, debug["step5"])
+            fluents, actions = LOCM._step7(
+                OS,
+                ap_state_pointers,
+                sorts,
+                bindings,
+                statics if statics is not None else {},
+                debug["step7"],
+                debug["viz"],
+            )
+        except Exception as e:
+            print(e)
+       
 
         return Model(fluents, actions)
 
@@ -337,7 +341,7 @@ class LOCM:
                     # create transition A.P
                     ap = AP(action, pos=j + 1, sort=sorts[obj.name])
                     obj_traces[obj].append(ap)
-
+ 
         # initialize the state set OS and transition set TS
         OS: OSType = defaultdict(list)
         TS: TSType = defaultdict(dict)
@@ -515,9 +519,9 @@ class LOCM:
                     for h2 in hs_sort_state[i + 1 :]:
                         # check if hypothesis parameters (v1 & v2) need to be unified
                         if (
-                            (h1.B == h2.B and h1.k == h2.k and h1.k_ == h2.k_)
-                                    or   # See https://github.com/AI-Planning/macq/discussions/200
-                            (h1.C == h2.C and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
+                            (h1.B.action == h2.B.action and h1.k == h2.k and h1.k_ == h2.k_)
+                            or   # See https://github.com/AI-Planning/macq/discussions/200
+                            (h1.C.action == h2.C.action and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
                         ):
                             v1 = state_bindings[h1]
                             v2 = state_bindings[h2]
@@ -656,6 +660,7 @@ class LOCM:
 
         # delete zero-object if it's state machine was discarded
         if not OS[0]:
+         
             del OS[0]
             del ap_state_pointers[0]
 

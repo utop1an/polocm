@@ -6,7 +6,6 @@ from .model import Model
 from .polocm import POLOCM
 from .locm import LOCM
 
-
 __all__ = [
     "LearnedAction",
     "LearnedLiftedAction",

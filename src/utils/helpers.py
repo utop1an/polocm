@@ -96,6 +96,7 @@ def check_valid(subset_df, valid_pairs):
     for i in range(arr.shape[0]):
         for j in range(arr.shape[1]):
             if arr[i, j] > 0:
+                # for each pair of transtion <t1,t2> in M
                 ordered_pair = (index[i], index[j])
                 if ordered_pair not in valid_pairs:
                     return False

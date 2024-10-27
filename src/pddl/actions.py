@@ -97,7 +97,15 @@ class Action:
                 cost = 1
             return PropositionalAction(name, precondition, effects, cost)
         else:
-            return None
+            if metric:
+                if self.cost is None:
+                    cost = 0
+                else:
+                    cost = int(self.cost.instantiate(
+                        var_mapping, init_assignments).expression.value)
+            else:
+                cost = 1
+            return PropositionalAction(name, precondition, [], cost)
 
 
 class PropositionalAction:

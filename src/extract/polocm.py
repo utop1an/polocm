@@ -7,6 +7,7 @@ from typing import Dict, List, NamedTuple, Optional, Set, Tuple, Union
 from warnings import warn
 import networkx as nx
 import pulp as pl
+from requests import get
 from tabulate import tabulate
 import numpy as np
 import time
@@ -263,7 +264,7 @@ class POLOCM:
     def __new__(
         cls,
         obs_tracelist: ObservedTraceList,
-        sorts = None,
+        sort_knowledge = False,
         statics: Optional[Statics] = None,
         viz: bool = False,
         view: bool = False,
@@ -308,8 +309,11 @@ class POLOCM:
         else:
             debug = defaultdict(lambda: False)
 
-        if (sorts is None):
+        if (not sort_knowledge):
             sorts = POLOCM._get_sorts(obs_tracelist, debug["sorts"])
+            sort_lookup = None
+        else:
+            sorts, sort_lookup = POLOCM._get_sorts_from_knowledge(obs_tracelist)
 
         if debug["sorts"]:
             print(f"Sorts:\n{sorts}", end="\n\n")
@@ -328,15 +332,15 @@ class POLOCM:
                     'nodefileind=2',    # Enable node file storage on disk
                     'nodefilelim=16384' # Set node file limit to 10 GB
                 ] )
-            return POLOCM.polocm(sorts, obs_tracelist, solver, debug)
+            return POLOCM.polocm(sorts, obs_tracelist, solver, debug, sort_lookup = sort_lookup)
         elif prob_type == 'locm2':
-            return POLOCM.locm2(sorts, obs_tracelist, debug)
+            return POLOCM.locm2(sorts, obs_tracelist, debug, sort_lookup = sort_lookup)
         else:
             return None, None, None
 
     @staticmethod
     @set_timer_throw_exc(num_seconds=600, exception=POLOCMTimeOut, max_time=600, stage='polocm')
-    def polocm(sorts, obs_tracelist, solver, debug):
+    def polocm(sorts, obs_tracelist, solver, debug, sort_lookup = None):
         try:
             start = time.time()
             trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
@@ -360,7 +364,10 @@ class POLOCM:
             TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
             HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
             bindings = POLOCM._step4(HS, debug["step4"])
+
             bindings = POLOCM._step5(HS, bindings,ap_state_pointers, OS, debug["step5"])
+
+         
             fluents, actions = POLOCM._step7(
                 OS,
                 ap_state_pointers,
@@ -368,6 +375,7 @@ class POLOCM:
                 sorts,
                 bindings,
                 {},  # statics
+                sort_lookup,
                 debug["step7"],
             )
             model = Model(fluents, actions)
@@ -384,7 +392,7 @@ class POLOCM:
     
     @staticmethod
     @set_timer_throw_exc(num_seconds=600, exception=POLOCMTimeOut, max_time=600, stage='locm2')
-    def locm2(sorts, obs_tracelist, debug):
+    def locm2(sorts, obs_tracelist, debug, sort_lookup = None):
         try:
             start = time.time()
             AML, obj_traces_overall, dependencies = POLOCM._locm2_step1(obs_tracelist, sorts, debug['2step0'])
@@ -407,7 +415,9 @@ class POLOCM:
                 sorts,
                 bindings,
                 {},
+                sort_lookup,
                 debug["step7"],
+                debug["viz"]
             )
             model = Model(fluents, actions)
             locm_time = time.time() - start - locm2_time
@@ -463,6 +473,39 @@ class POLOCM:
 
      
         return obj_sorts
+    
+    @staticmethod
+    def _get_sorts_from_knowledge(
+        obs_tracelist: ObservedTraceList, debug=False
+    ) -> Tuple[Sorts, Dict[int, str]]:
+        
+        sort_lookup: Dict[int, str] = {}
+
+        s = defaultdict(set)
+        for obs_trace in obs_tracelist:
+            for obs in obs_trace:
+                action = obs.action
+                if action is None:
+                    continue
+                for i,obj in enumerate(action.obj_params):
+                    s[action.name, obj.obj_type].add(obj.name)
+        merged_s = defaultdict(set)
+        for action_sort, objs in s.items():
+            action, sort = action_sort
+            merged_s[sort] = merged_s[sort].union(objs)
+        
+        
+        # add zero class
+        obj_sorts = {}
+        for i, sort in enumerate(list(merged_s.keys())):
+            for obj in merged_s[sort]:
+                # NOTE: object sorts are 1-indexed so the zero-object can be sort 0
+                obj_sorts[obj] = i + 1
+                sort_lookup[i + 1] = sort
+        obj_sorts['zero'] = 0
+        sort_lookup[0] = 'zero'
+     
+        return obj_sorts, sort_lookup
 
     @staticmethod
     def _pointer_to_set(states: List[Set], pointer, pointer2=None) -> Tuple[int, int]:
@@ -1008,7 +1051,7 @@ class POLOCM:
                         else:
                             candidate_duplicate_action = None
                         if candidate_duplicate_action and candidate_duplicate_action.action == action:
-                            dependencies[candidate_duplicate_action.action.name].add(ap)
+                              dependencies[candidate_duplicate_action.action.name].add(ap)
                         else:
                             obj_traces[obj].append(ap)
                             graphs[sort].add_node(ap)
@@ -1147,14 +1190,15 @@ class POLOCM:
         transition_sets_per_sort = []
 
         # Preprocess valid pairs into a set for fast lookup in check_valid
-        valid_pairs = set()
-        for ct_list in consecutive_transitions_per_sort:
-            valid_pairs.update(ct_list)
+        # valid_pairs = set()
+        # for ct_list in consecutive_transitions_per_sort:
+        #     valid_pairs.update(ct_list)
 
         # For each sort
         for index, holes in enumerate(H_per_sort):
             # Initialize a set for transition sets for the current sort
             transition_set_set = set()
+            valid_pairs = set(consecutive_transitions_per_sort[index])
 
             transitions = transitions_per_sort[index]  # transitions is a list
 
@@ -1189,6 +1233,7 @@ class POLOCM:
                                 # Check for well-formedness
                                 if check_well_formed(subset_df):
                                     # Check for validity against data
+                                    
                                     if check_valid(subset_df, valid_pairs):
                                         transition_set_set.add(s_frozen)
                                         found_valid_set = True
@@ -1241,17 +1286,29 @@ class POLOCM:
                 if obj != zero_obj:
                     for sort_, transition_sets in enumerate(transition_sets_per_sort):
                         for fsm_no, transitions in enumerate(transition_sets):
-                          
-                            subseq = [x for x in seq if x in transitions]
+                            
                             sort = sorts[obj.name]
-                            fsm = FSM(sort, fsm_no)
-                            TS[fsm][obj] = subseq
+                            if (sort == sort_):
+                                subseq = [x for x in seq if x in transitions]
+                                
+                                fsm = FSM(sort, fsm_no)
+                      
+                                TS[fsm][obj] = subseq
                 else:
                     TS[zero_fsm][zero_obj] = seq
 
             TS_overall.append(dict(TS))
+
+
         if debug:
-            print("TS_overall: \n", TS_overall)
+            for sort, transition_sets in enumerate(transition_sets_per_sort):
+                print(f"Sort {sort}:")
+                for fsm_no, transitions in enumerate(transition_sets):
+                    print(f"FSM {fsm_no}: {transitions}")
+            for trace_no, TS in enumerate(TS_overall):
+                print(f"Trace {trace_no}:")
+                for fsm, obj_ts in TS.items():
+                    print(f"FSM {fsm}: {obj_ts}")
 
         # initialize ap_state_pointers and OS      
         for sort, transition_sets in enumerate(transition_sets_per_sort):
@@ -1276,7 +1333,7 @@ class POLOCM:
 
         if debug:
             print('ap_state_pointers: \n', ap_state_pointers)
-            print('Initialize OS: \n', OS)
+       
        
 
         # unify end - start state for consecutive transitions
@@ -1465,7 +1522,7 @@ class POLOCM:
                         # check if hypothesis parameters (v1 & v2) need to be unified
                         if (
                             (h1.B.action == h2.B.action and h1.k == h2.k and h1.k_ == h2.k_)
-                            or
+                            and # See https://github.com/AI-Planning/macq/discussions/200 
                             (h1.C.action == h2.C.action and h1.l == h2.l and h1.l_ == h2.l_)  # fmt: skip
                         ):
                             v1 = state_bindings[h1]
@@ -1481,6 +1538,10 @@ class POLOCM:
                                 )
                                 state_params.pop(P2)
                                 state_param_pointers[v2] = P1
+
+                                # fix state_param_pointers after v2
+                                for ind in range(v2 + 1, len(state_param_pointers)):
+                                    state_param_pointers[ind] -= 1
 
                 # add state bindings for the sort to the output bindings
                 # replacing hypothesis params with actual state params
@@ -1505,8 +1566,6 @@ class POLOCM:
 
         # check each bindings[G][S] -> (h, P)
         for fsm, hs_fsm in HS.items():
-            
-
             for state, hs in hs_fsm.items():
                 # track all the h.Bs that occur in bindings[G][S]
                 pointers = OS[fsm][state]
@@ -1515,10 +1574,10 @@ class POLOCM:
                 outaps = set(ap for ap, (start, end) in ap_state_pointers[fsm].items() if start in pointers)        
                 # track the set of h.B that set parameter P
                 sets_P = defaultdict(set)
-                all_P = set()
+              
                 for h, P in bindings[fsm][state]:
                     sets_P[P].add(h)
-                    all_P.add(h.B)     
+                    
                 # for each P, check if there is a transition h.B that never sets parameter P
                 # i.e. if sets_P[P] != all_hB
                 for P, setby in sets_P.items():
@@ -1545,10 +1604,44 @@ class POLOCM:
                         # remove all bindings referencing P
                         for h, P_ in bindings[fsm][state].copy():
                             if P_ == P:
-                                
                                 bindings[fsm][state].remove(Binding(h, P_))
                         if len(bindings[fsm][state]) == 0:
                             del bindings[fsm][state]
+
+                # all_hB = set()
+                # # track the set of h.B that set parameter P
+                # sets_P = defaultdict(set)
+                # for h, P in bindings[fsm][state]:
+                #     sets_P[P].add(h.B)
+                #     all_hB.add(h.B)
+
+                # # for each P, check if there is a transition h.B that never sets parameter P
+                # # i.e. if sets_P[P] != all_hB
+                # for P, setby in sets_P.items():
+                #     if not setby == all_hB:  # P is a flawed parameter
+                #         # remove all bindings referencing P
+                #         for h , P_ in bindings[fsm][state].copy():
+                #             if P_ == P:
+                #                 bindings[fsm][state].remove(Binding(h, P_))
+                #         if len(bindings[fsm][state]) == 0:
+                #             del bindings[fsm][state]
+
+                # # do the same for checking h.C reading parameter P
+                # # See https://github.com/AI-Planning/macq/discussions/200
+                # all_hC = set()
+                # reads_P = defaultdict(set)
+                # if state in bindings[fsm]:
+                #     for h, P in bindings[fsm][state]:
+                #         reads_P[P].add(h.C)
+                #         all_hC.add(h.C)
+                #     for P, readby in reads_P.items():
+                #         if not readby == all_hC:
+                #             for h, P_ in bindings[fsm][state].copy():
+                #                 if P_ == P:
+                #                     bindings[fsm][state].remove(Binding(h, P_))
+                #             if len(bindings[fsm][state]) == 0:
+                #                 del bindings[fsm][state]
+        
         for k, v in bindings.copy().items():
             if not v:
                 del bindings[k]
@@ -1558,38 +1651,46 @@ class POLOCM:
     def get_state_machines(
         ap_state_pointers: APStatePointers,
         OS: OSType,
-        bindings: Optional[Bindings] = None,
+        state_params
     ):
-        from graphviz import Digraph
+        import os
 
-        state_machines = []
-        for (fsm, trans), states in zip(ap_state_pointers.items(), OS.values()):
-            graph = Digraph(f"LOCM-step1-{fsm}")
-            for state in range(len(states)):
-                label = f"state{state}"
+        import networkx as nx
+
+        for fsm in OS:
+            G = nx.DiGraph()
+            for n in range(len(OS[fsm])):
+                lbl = f"state{n}"
                 if (
-                    bindings is not None
-                    and fsm in bindings
-                    and state in bindings[fsm]
+                    state_params is not None
+                    and fsm in state_params
+                    and n in state_params[fsm]
                 ):
-                    label += f"\n["
-                    params = []
-                    for binding in bindings[fsm][state]:
-                        params.append(f"{binding.hypothesis.G_}")
-                    label += f",".join(params)
-                    label += f"]"
-                graph.node(str(state), label=label, shape="oval")
-            for ap, apstate in trans.items():
+                    lbl += str(
+                        [
+                            state_params[fsm][n][v]
+                            for v in sorted(state_params[fsm][n].keys())
+                        ]
+                    )
+                G.add_node(n, label=lbl, shape="oval")
+            for ap, apstate in ap_state_pointers[fsm].items():
                 start_idx, end_idx = POLOCM._pointer_to_set(
-                    states, apstate.start, apstate.end
+                    OS[fsm], apstate.start, apstate.end
                 )
-                graph.edge(
-                    str(start_idx), str(end_idx), label=f"{ap.action.name}.{ap.pos}"
-                )
-
-            state_machines.append(graph)
-
-        return state_machines
+                # check if edge is already in graph
+                if G.has_edge(start_idx, end_idx):
+                    # append to the edge label
+                    G.edges[start_idx, end_idx][
+                        "label"
+                    ] += f"\n{ap.action.name}.{ap.pos}"
+                else:
+                    G.add_edge(start_idx, end_idx, label=f"{ap.action.name}.{ap.pos}")
+            # write to dot file
+            nx.drawing.nx_pydot.write_dot(G, f"LOCM-step7-{fsm}.dot")
+            os.system(
+                f"dot -Tpng LOCM-step7-{fsm}.dot -o LOCM-step7-{fsm}.png"
+            )
+            os.system(f"rm LOCM-step7-{fsm}.dot")
 
     @staticmethod
     def _step7(
@@ -1599,27 +1700,58 @@ class POLOCM:
         sorts: Sorts,
         bindings: Bindings,
         statics: Statics,
+        sort_lookup = None,
         debug: bool = False,
+        viz: bool = False,
     ) -> Tuple[Set[LearnedLiftedFluent], Set[LearnedLiftedAction]]:
         """Step 7: Formation of PDDL action schema
         Implicitly includes Step 6 (statics) by including statics as an argument
         and adding to the relevant actions while being constructed.
         """
-
-        shift = 0
+        def get_sort_name(sort):
+            if sort_lookup is not None:
+                return sort_lookup[sort]
+            return f"S{sort}"
+        def get_fsm_name(fsm:FSM):
+            if sort_lookup is not None:
+                return f"{sort_lookup[fsm.sort]}F{fsm.index}"
+            else:
+                return str(fsm)
+        
         # delete zero-object if it's state machine was discarded
         zero_fsm = FSM(0,0)
+        shift = 0
         if not OS[zero_fsm]:
             del OS[zero_fsm]
             del ap_state_pointers[zero_fsm]
             shift = 1
+
         if debug:
 
             print("bindings:")
             pprint(bindings)
             print()
+        all_aps: Dict[str, Set[AP]] = defaultdict(set)
+        for aps in ap_state_pointers.values():
+            for ap in aps:
+                all_aps[ap.action.name].add(ap)
+        
+        actions = {}
+        fluents = defaultdict(dict)
+        
+        
+        
 
-       
+        for action, aps in all_aps.items():
+            param_sorts = set(ap for ap in aps)
+            deps = dependencies.get(action, set())
+            param_sorts= list(param_sorts.union(deps))
+            param_sorts.sort(key=lambda ap: ap.pos)
+           
+            actions[action] = LearnedLiftedAction(
+                action, [get_sort_name(s.sort) for s in param_sorts]
+            )
+        
         bound_param_sorts= defaultdict(dict)
         for fsm, states in OS.items():
             bound_param_sorts[fsm] = defaultdict(list)
@@ -1634,34 +1766,6 @@ class POLOCM:
                             bound_param_sorts[fsm][state].append(binding.hypothesis.G_)
                 else:
                     bound_param_sorts[fsm][state] = []
-        # bound_param_sorts = {
-        #     fsm: {
-        #         state: [
-        #             binding.hypothesis.G_
-        #             for binding in bindings.get(fsm, {}).get(state, [])
-        #         ]
-        #         for state in range(len(states))
-        #     }
-        #     for fsm, states in OS.items()
-        # }
-
-        actions = {}
-        fluents = defaultdict(dict)
-        
-        all_aps: Dict[str, Set[AP]] = defaultdict(set)
-        for aps in ap_state_pointers.values():
-            for ap in aps:
-                all_aps[ap.action.name].add(ap)
-
-        for action, aps in all_aps.items():
-            param_sorts = set(ap for ap in aps)
-            deps = dependencies.get(action, set())
-            param_sorts= list(param_sorts.union(deps))
-            param_sorts.sort(key=lambda ap: ap.pos)
-           
-            actions[action] = LearnedLiftedAction(
-                action, [f"sort{s.sort}" for s in param_sorts]
-            )
 
         @dataclass
         class TemplateFluent:
@@ -1674,8 +1778,8 @@ class POLOCM:
         for fsm, state_bindings in bound_param_sorts.items():
             for state, bound_sorts in state_bindings.items():
                 fluents[fsm][state] = TemplateFluent(
-                    f"{fsm}state{state}",
-                    [f"sort{fsm.sort}"]+[f"sort{s}" for s in bound_sorts],
+                    f"{get_fsm_name(fsm)}s{state}",
+                    [get_sort_name(fsm.sort)]+[get_sort_name(s) for s in bound_sorts],
                 )
         
         for (fsm, aps), states in zip(ap_state_pointers.items(), OS.values()):
@@ -1726,10 +1830,8 @@ class POLOCM:
                         for h, P in bs:
                             if P not in added_P and  h.k == ap.pos:
                                 bound_param_inds.append(h.k_ - shift)
-                                added_P.append(P)
-                        # bound_param_inds = [
-                        #     b.hypothesis.l_ -shift  for b in bindings[fsm][end_state]
-                        # ]
+                                added_P.append(P) 
+                    
                     end_fluent = LearnedLiftedFluent(
                         end_fluent_temp.name,
                         end_fluent_temp.param_sorts,
@@ -1740,6 +1842,111 @@ class POLOCM:
 
                     fluents[fsm][end_state] = end_fluent
                     actions[ap.action.name].update_add(end_fluent)
+
+        # state_params = defaultdict(dict)
+        # state_params_to_hyps = defaultdict(dict)
+        # for fsm in bindings:
+        #     state_params[fsm] = defaultdict(dict)
+        #     state_params_to_hyps[fsm] = defaultdict(dict)
+        #     for state in bindings[fsm]:
+        #         keys = {b.param for b in bindings[fsm][state]}
+                
+        #         for key in keys:
+        #             hyps = [
+        #                 b.hypothesis for b in bindings[fsm][state] if b.param == key
+        #             ]
+        #             # assert that all are the same G_
+        #             assert len(set([h.G_ for h in hyps])) == 1
+        #             state_params[fsm][state][key] = hyps[0].G_
+        #             state_params_to_hyps[fsm][state][key] = hyps
+
+        # if viz:
+        #     POLOCM.get_state_machines(ap_state_pointers, OS, state_params)
+
+        # for fsm in ap_state_pointers:
+        #     sort_str = get_sort_name(fsm.sort)
+        #     for ap in ap_state_pointers[fsm]:
+        #         if ap.action.name not in actions:
+                    
+        #             actions[ap.action.name] = LearnedLiftedAction(
+        #                 ap.action.name,
+        #                 [None for _ in range(len(all_aps[ap.action.name]))],  # type: ignore
+        #             )
+        #         a = actions[ap.action.name]
+        #         a.param_sorts[ap.pos - shift] = sort_str
+
+        #         start_pointer, end_pointer = ap_state_pointers[fsm][ap]
+        #         start_state, end_state = POLOCM._pointer_to_set(
+        #             OS[fsm], start_pointer, end_pointer
+        #         )
+
+        #         start_fluent_name = f"{get_fsm_name(fsm)}_s{start_state}"
+        #         if start_fluent_name not in fluents[ap.action.name]:
+        #             start_fluent = LearnedLiftedFluent(
+        #                 start_fluent_name,
+        #                 param_sorts=[sort_str],
+        #                 param_act_inds=[ap.pos - shift],
+        #             )
+        #             fluents[ap.action.name][start_fluent_name] = start_fluent
+
+        #         start_fluent = fluents[ap.action.name][start_fluent_name]
+
+        #         if (
+        #             fsm in state_params_to_hyps
+        #             and start_state in state_params_to_hyps[fsm]
+        #         ):
+        #             for param in state_params_to_hyps[fsm][start_state]:
+        #                 psort = None
+        #                 pind = None
+        #                 for hyp in state_params_to_hyps[fsm][start_state][param]:
+        #                     if hyp.C == ap:
+        #                         if (psort is not None and psort != hyp.G_) or \
+        #                            (pind is not None and pind != hyp.l_):
+        #                             raise Exception("Unsupported domain for LOCM")
+        #                         assert psort is None or psort == hyp.G_
+        #                         assert pind is None or pind == hyp.l_
+        #                         psort = hyp.G_
+        #                         pind = hyp.l_
+        #                 if psort is not None:
+        #                     start_fluent.param_sorts.append(get_sort_name(psort))
+        #                     start_fluent.param_act_inds.append(pind - shift)
+
+        #         a.update_precond(start_fluent)
+
+        #         if end_state != start_state:
+        #             end_fluent_name = f"{get_fsm_name(fsm)}_s{end_state}"
+        #             if end_fluent_name not in fluents[ap.action.name]:
+        #                 end_fluent = LearnedLiftedFluent(
+        #                     end_fluent_name,
+        #                     param_sorts=[sort_str],
+        #                     param_act_inds=[ap.pos - shift],
+        #                 )
+        #                 fluents[ap.action.name][end_fluent_name] = end_fluent
+
+        #             end_fluent = fluents[ap.action.name][end_fluent_name]
+
+        #             if (
+        #                 fsm in state_params_to_hyps
+        #                 and end_state in state_params_to_hyps[fsm]
+        #             ):
+        #                 for param in state_params_to_hyps[fsm][end_state]:
+        #                     psort = None
+        #                     pind = None
+        #                     for hyp in state_params_to_hyps[fsm][end_state][param]:
+        #                         if hyp.B == ap:
+        #                             if (psort is not None and psort != hyp.G_) or \
+        #                                (pind is not None and pind != hyp.k_):
+        #                                 raise Exception("Unsupported domain for LOCM")
+        #                             assert psort is None or psort == hyp.G_
+        #                             assert pind is None or pind == hyp.k_
+        #                             psort = hyp.G_
+        #                             pind = hyp.k_
+        #                     if psort is not None:
+        #                         end_fluent.param_sorts.append(get_sort_name(psort))
+        #                         end_fluent.param_act_inds.append(pind - shift)
+
+        #             a.update_delete(start_fluent)
+        #             a.update_add(end_fluent)
 
         fluents = set(fluent for fsm in fluents.values() for fluent in fsm.values())
         actions = set(actions.values())

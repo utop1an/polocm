@@ -279,7 +279,8 @@ def parse_action(alist, type_dict, predicate_dict):
         return pddl.Action(name, parameters, len(parameters),
                            precondition, eff, cost)
     else:
-        return None
+        return pddl.Action(name, parameters, len(parameters),
+                           precondition, [], cost)
 
 
 def parse_axiom(alist, type_dict, predicate_dict):

@@ -16,7 +16,7 @@ class PseudoPlanner:
             self.initialize_task()
             self.executability_type = executability_type
         except Exception as e:
-            raise InvalidModel(domain_filename, e)
+            raise Exception(f"Error parsing file{domain_filename}: {e} ")
 
     @set_timer_throw_exc(num_seconds=30, exception=GeneralTimeOut, max_time=30, source="pseudo planner")
     def initialize_task(self):
@@ -35,9 +35,9 @@ class PseudoPlanner:
     
     def get_overall_executability(self,action_sequence, debug=False):
         if not self.domain:
-            raise InvalidModel(self.domain_filename)
+            raise Exception("Domain not initialized")
         if (len(action_sequence)==0):
-            raise InvalidActionSequence("Length 0")
+            raise Exception("Error checking executability: Length 0")
         true_effs = set()
         # as we don't know the init states, we can only record the visited effects
         # we assume unvisited effects are true since all given action seqs are valid
@@ -89,9 +89,9 @@ class PseudoPlanner:
         
     def get_first_fail_executability(self,action_sequence, debug=False):
         if not self.domain:
-            raise InvalidModel(self.domain_filename)
+            raise Exception("Domain not initialized")
         if (len(action_sequence)==0):
-            raise InvalidActionSequence("Length 0")
+            raise Exception("Error checking executability: Length 0")
         true_effs = set()
 
         # as we don't know the init states, we can only record the visited effects
@@ -108,6 +108,9 @@ class PseudoPlanner:
             if ('sort0' in param_types):
                 index= param_types.index('sort0')
                 params.insert(index, 'zero')
+            elif ('zero' in param_types):
+                index= param_types.index('zero')
+                params.insert(index, 'zero')
             var_mapping = dict(zip(param_names, params))
             objects_by_type = dict(zip(params, param_types))
             op = action.instantiate(var_mapping,None, None,None, objects_by_type,None)
@@ -119,15 +122,19 @@ class PseudoPlanner:
             # not applicable
             if(len(invalid)>0):
                 executability = i/len(action_sequence)
+                # for prec in invalid:
+                #     print(prec.predicate, end= "|")
+                # print("", end=",")
+
                 if debug:
                     print(f"action {op.name} not executable")
                     print("preconditions not satisfied: ", invalid)
                     print("ending with executability: ", executability)
+                    
                 return executability
             # apply action
             adds = set(e for _,e in op.add_effects)
             dels = set(e for _,e in op.del_effects)
-            
             # mark visited effects
             visited = visited.union(adds).union(dels);
 
