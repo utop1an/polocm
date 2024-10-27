@@ -327,11 +327,7 @@ class POLOCM:
                 solver = pl.PULP_CBC_CMD(msg=False, timeLimit=600)
             else:
                 print(f"launching cplex with {cores} cores")
-                solver = pl.CPLEX_CMD(path=solver_path, msg=False, timeLimit=600, threads=cores, options=[
-                    'workmem=8192',    # Set working memory to 10 GB
-                    'nodefileind=2',    # Enable node file storage on disk
-                    'nodefilelim=16384' # Set node file limit to 10 GB
-                ] )
+                solver = pl.CPLEX_CMD(path=solver_path, msg=False, timeLimit=600, threads=cores, maxMemory=8192)
             return POLOCM.polocm(sorts, obs_tracelist, solver, debug, sort_lookup = sort_lookup)
         elif prob_type == 'locm2':
             return POLOCM.locm2(sorts, obs_tracelist, debug, sort_lookup = sort_lookup)

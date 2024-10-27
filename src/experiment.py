@@ -156,11 +156,10 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
         file_exists = os.path.exists(csv_file_path)
         with open(csv_file_path, 'a') as csv_file:
             if not file_exists:
-                headers = result_data.keys()
+                headers = result_data[0].keys()
                 csv_file.write(','.join(headers) + '\n')
 
             for data in result_data:
-
                 values = [str(data[key]) for key in data.keys()]
                 csv_file.write(','.join(values) + '\n')
 
