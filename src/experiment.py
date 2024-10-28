@@ -325,7 +325,7 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
 
     if ET > 1:
         logger.info("Running experiment in multiprocessing...")
-        with Pool(processes=ET) as pool:
+        with Pool(processes=ET, maxtasksperchild=1) as pool:
             res= pool.starmap_async(run_single_experiment, tasks).get()
             write_result_to_csv(output_dir, dod, res, logger)
     else:
