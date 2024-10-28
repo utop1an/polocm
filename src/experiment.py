@@ -168,7 +168,7 @@ def write_result_to_csv(output_dir,dod, result_data, logger):
 def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, output_dir ,logger, verbose=False):
     try: 
         remark = []
-        model, AP, runtime = POLOCM(obs_po_tracelist, solver_path=SOLVER, prob_type='polocm', cores=CT, logger=logger )
+        model, AP, runtime = POLOCM(obs_po_tracelist, sort_knowledge=True, solver_path=SOLVER, prob_type='polocm', cores=CT, logger=logger )
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
@@ -196,13 +196,14 @@ def single(obs_po_tracelist ,obs_tracelist: ObservedTraceList, domain_filename, 
 def single_locm2(obs_tracelist: ObservedTraceList, domain_filename, output_dir, verbose=False, logger=None):
     try: 
         remark = []
-        model,_, runtime = POLOCM(obs_tracelist, prob_type="locm2", logger=logger)
+        model,_, runtime = POLOCM(obs_tracelist, sort_knowledge=True, prob_type="locm2", logger=logger)
         filename = domain_filename + ".pddl"
         file_path = os.path.join(output_dir, "pddl", filename)
         tmp_file_path = os.path.join(output_dir, "pddl", "tmp", filename)
         model.to_pddl(domain_filename, domain_filename=file_path, problem_filename=tmp_file_path)
-      
+        print("Model to pddl done")
         executabililty, r = get_executability(obs_tracelist, domain_filename=file_path)
+        print(r)
         if r:
             remark.append(r)
         if len(remark)==0:
