@@ -1,5 +1,6 @@
 """.. 'include':: ../../docs/templates/extract/locm.md"""
 
+from cmath import polar
 from collections import defaultdict, Counter
 from dataclasses import asdict, dataclass
 from pprint import pprint
@@ -14,6 +15,7 @@ import time
 import pandas as pd
 import itertools
 import logging
+import gc
 
 from traces import Action, PlanningObject
 
@@ -349,6 +351,8 @@ class POLOCM:
             del prob
             APs, obj_traces_overall = POLOCM.polocm_step6(obj_trace_PO_matrix_overall, PO_vars_overall,obj_trace_FO_matrix_overall, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
             del obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, PO_vars_overall, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution
+            gc.collect()
+            polocm_time = time.time() - start
 
             AML = POLOCM._locm2_step0(obj_traces_overall, sorts, debug['2step0'])
             AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
@@ -358,6 +362,7 @@ class POLOCM:
             del AML_with_holes
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
             del H_per_sort, transitions_per_sort, consecutive_transitions_per_sort
+            gc.collect()
             locm2_time = time.time() - start - polocm_time
         
 
