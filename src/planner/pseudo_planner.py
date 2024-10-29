@@ -54,8 +54,8 @@ class PseudoPlanner:
             param_names = [p.name for p in action.parameters]
             param_types = [p.type_name for p in action.parameters]
             params = [obj.name for obj in a.obj_params]
-            if ('sort0' in param_types):
-                index= param_types.index('sort0')
+            if ('S0' in param_types):
+                index= param_types.index('S0')
                 params.insert(index, 'zero')
             elif ('zero' in param_types):
                 index= param_types.index('zero')
@@ -108,8 +108,8 @@ class PseudoPlanner:
             param_names = [p.name for p in action.parameters]
             param_types = [p.type_name for p in action.parameters]
             params = [obj.name for obj in a.obj_params]
-            if ('sort0' in param_types):
-                index= param_types.index('sort0')
+            if ('S0' in param_types):
+                index= param_types.index('S0')
                 params.insert(index, 'zero')
             elif ('zero' in param_types):
                 index= param_types.index('zero')
