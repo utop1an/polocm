@@ -45,17 +45,17 @@ class PseudoPlanner:
         error_count = 0
         for i, a in enumerate(action_sequence):
             action = self.domain.get_action(a.name)
+            
             # if action not found, meaning it has not been learned properly, with no precond or effects
             # we skip it, and add error count by 1
             if not action:
                 error_count += 1
                 continue
-
             param_names = [p.name for p in action.parameters]
             param_types = [p.type_name for p in action.parameters]
             params = [obj.name for obj in a.obj_params]
-            if ('S0' in param_types):
-                index= param_types.index('S0')
+            if ('s0' in param_types):
+                index= param_types.index('s0')
                 params.insert(index, 'zero')
             elif ('zero' in param_types):
                 index= param_types.index('zero')
@@ -108,8 +108,8 @@ class PseudoPlanner:
             param_names = [p.name for p in action.parameters]
             param_types = [p.type_name for p in action.parameters]
             params = [obj.name for obj in a.obj_params]
-            if ('S0' in param_types):
-                index= param_types.index('S0')
+            if ('s0' in param_types):
+                index= param_types.index('s0')
                 params.insert(index, 'zero')
             elif ('zero' in param_types):
                 index= param_types.index('zero')
