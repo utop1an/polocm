@@ -341,28 +341,34 @@ class POLOCM:
             start = time.time()
             trace_PO_matrix_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, sort_aps, dependencies = POLOCM.polocm_step1(obs_tracelist, sorts, debug['pstep1'])
             prob, PO_vars_overall = POLOCM.polocm_step2(trace_PO_matrix_overall, obj_trace_PO_matrix_overall, debug['pstep2'])
+            del trace_PO_matrix_overall
             prob, FO_vars_overall = POLOCM.polocm_step3(prob,PO_vars_overall, obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, debug['pstep3'])
             prob, sort_transition_matrix, sort_AP_vars = POLOCM.polocm_step4(prob, sort_aps, sorts,FO_vars_overall, obj_trace_FO_matrix_overall, debug['pstep4'])
+            del sort_aps
             solution = POLOCM.polocm_step5(prob, solver,sort_AP_vars, debug['pstep5'])
+            del prob
             APs, obj_traces_overall = POLOCM.polocm_step6(obj_trace_PO_matrix_overall, PO_vars_overall,obj_trace_FO_matrix_overall, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution, debug['pstep6'])
-            polocm_time = time.time() - start
-          
+            del obj_trace_PO_matrix_overall, obj_trace_FO_matrix_overall, PO_vars_overall, FO_vars_overall, sort_transition_matrix, sort_AP_vars, solution
 
             AML = POLOCM._locm2_step0(obj_traces_overall, sorts, debug['2step0'])
             AML_with_holes = POLOCM._locm2_step2(AML, debug['2step2'])
             H_per_sort = POLOCM._locm2_step3(AML_with_holes, debug['3step3'])
             transitions_per_sort = POLOCM._locm2_step4(AML_with_holes)
             consecutive_transitions_per_sort = POLOCM._locm2_step5(AML_with_holes)
+            del AML_with_holes
             S = POLOCM._locm2_step6(AML, H_per_sort, transitions_per_sort, consecutive_transitions_per_sort)
+            del H_per_sort, transitions_per_sort, consecutive_transitions_per_sort
             locm2_time = time.time() - start - polocm_time
         
 
             TS_overall, ap_state_pointers, OS = POLOCM._step1(obj_traces_overall, sorts, S, AML, debug['step1'])
+            del obj_traces_overall
             HS = POLOCM._step3(TS_overall, ap_state_pointers, OS, sorts, AML, debug["step3"])
+            del TS_overall
             bindings = POLOCM._step4(HS, debug["step4"])
 
             bindings = POLOCM._step5(HS, bindings,ap_state_pointers, OS, debug["step5"])
-
+            del HS
          
             fluents, actions = POLOCM._step7(
                 OS,
