@@ -18,6 +18,7 @@ DEBUG = False
 SOLVER = "default"
 ET:int = 2
 CT:int = 4
+LOS = []
 
 lock= Lock()
 
@@ -317,7 +318,10 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
         random.seed(seed)
 
     tasks = []
+    print(LOS)
     for learning_obj in data:
+        if LOS and learning_obj['id'] not in LOS:
+            continue
         tasks.append((output_dir, dod, learning_obj, measurement, seed, verbose, logger))
         
     
@@ -340,7 +344,7 @@ def experiment(input_filepath, output_dir, dod, measurement, seed=None, verbose=
     logger.info("Experiment completed.")
 
 def main(args):
-    global SOLVER, DEBUG, ET, CT
+    global SOLVER, DEBUG, ET, CT, LOS
     input_filepath = args.i
     output_dir = args.o
     seed = args.s
@@ -349,12 +353,15 @@ def main(args):
     dod = args.d
     cplex_dir = args.cplex
     debug = args.debug
+    los = args.los
     if debug:
         DEBUG = True
     if experiment_threads:
         ET = experiment_threads
     if cplex_threads:
         CT = cplex_threads
+    if los:
+        LOS = los
     dods = [0, 0.1,0.2,0.3,0.4,0.5, 0.6,0.7,0.8,0.9,1]
     if dod not in dods:
         print(f"Invalid dod {dod}. Choose from {dods}")
@@ -404,5 +411,6 @@ if __name__ == "__main__":
     parser.add_argument("--cplex", type=str, default="./", help="Path to cplex solver")
     parser.add_argument('--ct', type=int, default=4, help='Number of threads for cplex')
     parser.add_argument('--debug', action='store_true', help='Debug mode')
+    parser.add_argument('--los', nargs="+", type=int, help='Run only for these learning objects')
     args = parser.parse_args()
     main(args)

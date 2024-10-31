@@ -767,27 +767,27 @@ class POLOCM:
                                 # if(1-transpose_var != current_PO):
                                 prob += var <= 1 - transpose_var
                                 
-                            candidates = []
-                            for x in range(len(FO_matrix)):
+                            # candidates = []
+                            # for x in range(len(FO_matrix)):
                              
-                                if (x!=i and x!=j):
-                                    ix = PO_vars_overall[trace_no].get(PO_matrix.iloc[i,x],PO_matrix.iloc[i,x])
-                                    xj = PO_vars_overall[trace_no].get(PO_matrix.iloc[x,j],PO_matrix.iloc[x,j])
-                                    if (isinstance(ix, pl.LpVariable) or isinstance(xj, pl.LpVariable)):
-                                        # aux = NAND(ix, xj)
-                                        aux = pl.LpVariable(f"x_{str(trace_no)}_{str(obj.name)}_{i}_{j}_{x}", cat=pl.LpBinary)
-                                        prob += aux <= 2-ix-xj
-                                        prob += aux >= ix-xj
-                                        prob += aux >= xj-ix
-                                        prob += aux <= ix+xj
+                            #     if (x!=i and x!=j):
+                            #         ix = PO_vars_overall[trace_no].get(PO_matrix.iloc[i,x],PO_matrix.iloc[i,x])
+                            #         xj = PO_vars_overall[trace_no].get(PO_matrix.iloc[x,j],PO_matrix.iloc[x,j])
+                            #         if (isinstance(ix, pl.LpVariable) or isinstance(xj, pl.LpVariable)):
+                            #             # aux = NAND(ix, xj)
+                            #             aux = pl.LpVariable(f"x_{str(trace_no)}_{str(obj.name)}_{i}_{j}_{x}", cat=pl.LpBinary)
+                            #             prob += aux <= 2-ix-xj
+                            #             prob += aux >= ix-xj
+                            #             prob += aux >= xj-ix
+                            #             prob += aux <= ix+xj
                                       
-                                        # var <= aux
-                                        prob += var <= aux
-                                        candidates.append(aux)
+                            #             # var <= aux
+                            #             prob += var <= aux
+                            #             candidates.append(aux)
                                         
-                            if (len(candidates)>0):
-                                # var = 1 if all aux = 1
-                                prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO
+                            # if (len(candidates)>0):
+                            #     # var = 1 if all aux = 1
+                            #     prob += var >= pl.lpSum(candidates) - len(candidates) + current_PO
                                
             FO_vars_overall.append(FO_vars)
         for trace_no, matrices in enumerate(obj_trace_FO_matrix_overall):
