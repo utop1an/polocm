@@ -5,6 +5,7 @@ from .exceptions import IncompatibleObservationToken
 from .model import Model
 from .polocm import POLOCM
 from .locm import LOCM
+from .baseline_polocm import POLOCMBASELINE
 
 __all__ = [
     "LearnedAction",
@@ -15,4 +16,5 @@ __all__ = [
     "IncompatibleObservationToken",
     "POLOCM",
     "LOCM",
+    "POLOCMBASELINE"
 ]

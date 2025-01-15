@@ -44,7 +44,7 @@ def complete_FO(FO_matrix, PO_matrix):
                         # FO_ij should be 0
                         if ix==1 and xj==1:
                             flag=0
-                            break;
+                            break
                 # No change, FO_ij should be 1
                 if flag==1:
                     FO_matrix.iloc[i,j]=1
