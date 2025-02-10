@@ -1,3 +1,4 @@
+import itertools
 from . import axioms
 from . import predicates
 
@@ -33,6 +34,27 @@ class Task:
             if (action.name == name):
                 return action
         return None
+    
+    def get_grounded_actions(self, type_objs):
+        grounded_actions = []
+        for action in self.actions:
+            
+            param_names = [p.name for p in action.parameters]
+            param_types = [p.type_name for p in action.parameters]
+            
+            type_obj_list = [type_objs[t] for t in param_types]
+            combinations = list(itertools.product(*type_obj_list))
+
+            for obj_params in combinations:
+            
+                params = [obj for obj in obj_params]
+            
+               
+                var_mapping = dict(zip(param_names, params))
+                objects_by_type = dict(zip(params, param_types))
+                op = action.instantiate(var_mapping,None, None,None, objects_by_type,None)
+                grounded_actions.append(op)
+        return grounded_actions
 
     def dump(self):
         print("Problem %s: %s [%s]" % (

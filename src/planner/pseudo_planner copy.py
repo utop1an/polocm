@@ -46,13 +46,13 @@ class PseudoPlanner:
 
     def check_executability(self,action_sequence, debug=False):
         if (self.executability_type == 'overall'):
-            return self.get_overall_executability("l",action_sequence,set(), set(), debug)
+            return self.get_overall_executability(action_sequence, debug)
         elif (self.executability_type == 'first_fail'):
             return self.get_first_fail_executability(action_sequence, debug)
         elif (self.executability_type == 'twoway'):
             return self.get_twoway_executabilities(action_sequence, debug)
         else:
-            raise Exception("Invalid executability type")
+            return self.get_overall_executability(action_sequence, debug)
         
     def get_twoway_executabilities(self,action_sequence, debug=False):
         if not self.domain:
@@ -62,58 +62,31 @@ class PseudoPlanner:
         
         if (len(action_sequence)==0):
             raise Exception("Error checking executability: Length 0")
-        
-        l_seqs, l_init, l_visited, lim = self.get_seqs('l', action_sequence)
-        gt_seqs, gt_init, gt_visited,_ = self.get_seqs('gt', action_sequence, lim)
-
-        l_res = []
-        gt_res = []
-        for i in range(len(l_seqs)):
-            exe_on_learned = self.get_overall_executability('l', gt_seqs[i], l_init, l_visited, debug)
-            exe_on_gt = self.get_overall_executability('gt', l_seqs[i], gt_init, gt_visited, debug)
-            # exe_on_learned = self.get_overall_executability('l', gt_seqs[i], set(), set(), debug)
-            # exe_on_gt = self.get_overall_executability('gt', l_seqs[i], set(), set(), debug)
-            l_res.append(exe_on_learned)
-            gt_res.append(exe_on_gt)
-        
-        return sum(l_res)/len(l_res), sum(gt_res)/len(gt_res)
-    
-    def get_seqs(self, domain_type, action_sequence, limit=None):
-        if domain_type == 'l':
-            domain = self.domain
-        elif domain_type == 'gt':
-            domain = self.gt_domain
-        else:
-            print("get seqs", domain_type)
-            raise Exception("Invalid domain")
-        
         true_effs = set()
         type_objs = defaultdict(set)
 
         # as we don't know the init states, we can only record the visited effects
         # we assume unvisited effects are true since all given action seqs are valid
         visited = set()
+        error_count = 0
         for i, a in enumerate(action_sequence):
-            if limit and i==limit:
-                break
-            action = domain.get_action(a.name)
+            action = self.domain.get_action(a.name)
             
             # if action not found, meaning it has not been learned properly, with no precond or effects
             # we skip it, and add error count by 1
             if not action:
-                break
+                error_count += 1
+                continue
             param_names = [p.name for p in action.parameters]
             param_types = [p.type_name for p in action.parameters]
             params = [obj.name for obj in a.obj_params]
             
-           
             if ('s0' in param_types):
                 index= param_types.index('s0')
                 params.insert(index, 'zero')
             elif ('zero' in param_types):
                 index= param_types.index('zero')
                 params.insert(index, 'zero')
-        
             var_mapping = dict(zip(param_names, params))
             objects_by_type = dict(zip(params, param_types))
            
@@ -129,7 +102,10 @@ class PseudoPlanner:
             invalid = invalid.intersection(visited)
             # not applicable
             if(len(invalid)>0):
-                break
+                error_count += 1
+                if debug:
+                    print(f"action {op} not executable")
+                    print("preconditions not satisfied: ", invalid)
 
             # apply action
             adds = set(e for _,e in op.add_effects)
@@ -141,20 +117,15 @@ class PseudoPlanner:
             true_effs = true_effs.union(adds)
             true_effs.difference_update(dels)
 
-        new_action_sequences = self.generate_new_action_sequence(domain_type, type_objs, true_effs, visited, len(action_sequence))
-        
-        return new_action_sequences, true_effs, visited, i
+        exe_on_learned = 1-error_count/len(action_sequence)
 
-    def generate_new_action_sequence(self,domain_type, type_objs, init_effs, init_visited, length, debug=False):
-        if domain_type == 'l':
-            domain = self.domain
-        elif domain_type == 'gt':
-            domain = self.gt_domain
-        else:
-            print("gen seqs", domain_type)
-            raise Exception("Invalid domain")
+        new_action_sequences = self.generate_new_action_sequence(type_objs, set(), set(), len(action_sequence), debug)
+        exe_on_gt = self.get_gt_executability(new_action_sequences, debug)
         
-        grounded_actions = domain.get_grounded_actions(type_objs)
+        return exe_on_learned, exe_on_gt
+
+    def generate_new_action_sequence(self,type_objs, init_effs, init_visited, length, debug=False):
+        grounded_actions = self.domain.get_grounded_actions(type_objs)
         if debug:
             print("number of grounded actions:", len(grounded_actions))
             print("Grounded actions:", grounded_actions)
@@ -172,7 +143,7 @@ class PseudoPlanner:
         
         
         plans = []
-        for _ in range(10):
+        for _ in range(5):
             plan = []
             for i in range(length):
                 candiates = get_applicable_actions(true_effs, visited)
@@ -210,39 +181,31 @@ class PseudoPlanner:
         return action_seqs
 
     
-    # def get_gt_executability(self,action_sequences, debug=False):
-    #     if (len(action_sequences)==0):
-    #         print("cant find act seqs, exe 0")
-    #         return 0
-    #     res = []
-    #     gt_planner = PseudoPlanner(self.gt_domain_filename, executability_type='overall')
-    #     for act_seq in action_sequences:
-    #         if (len(act_seq)==0):
-    #             print("cant find valid act seq, exe 0")
-    #             res.append(0)
-    #             continue
-
-    #         exe = gt_planner.check_executability(act_seq, debug)
-    #         res.append(exe)
-    #     return sum(res)/len(res)
-    
-    def get_overall_executability(self,domain_type, action_sequence,_true_effs, _visited, debug=False):
-        if domain_type == 'l':
-            domain = self.domain
-        elif domain_type == 'gt':
-            domain = self.gt_domain
-        else:
-            raise Exception("Invalid domain")
-        if not domain:
-            raise Exception("Domain not initialized")
-        
-        if (len(action_sequence)==0):
+    def get_gt_executability(self,action_sequences, debug=False):
+        if (len(action_sequences)==0):
+            print("cant find act seqs, exe 0")
             return 0
-        
-        true_effs = _true_effs.copy()
+        res = []
+        gt_planner = PseudoPlanner(self.gt_domain_filename, executability_type='overall')
+        for act_seq in action_sequences:
+            if (len(act_seq)==0):
+                print("cant find valid act seq, exe 0")
+                res.append(0)
+                continue
+
+            exe = gt_planner.check_executability(act_seq, debug)
+            res.append(exe)
+        return sum(res)/len(res)
+
+    def get_overall_executability(self,action_sequence, debug=False):
+        if not self.domain:
+            raise Exception("Domain not initialized")
+        if (len(action_sequence)==0):
+            raise Exception("Error checking executability: Length 0")
+        true_effs = set()
         # as we don't know the init states, we can only record the visited effects
         # we assume unvisited effects are true since all given action seqs are valid
-        visited = _visited.copy()
+        visited = set()
         error_count = 0
         for i, a in enumerate(action_sequence):
             action = self.domain.get_action(a.name)
@@ -280,7 +243,7 @@ class PseudoPlanner:
             dels = set(e for _,e in op.del_effects)
             
             # mark visited effects
-            visited = visited.union(adds).union(dels)
+            visited = visited.union(adds).union(dels);
 
             true_effs = true_effs.union(adds)
             true_effs.difference_update(dels)
@@ -289,8 +252,6 @@ class PseudoPlanner:
                 print(f"action {op} executed")
                 
         return 1-error_count/len(action_sequence)
-
-    
         
     def get_first_fail_executability(self,action_sequence, debug=False):
         if not self.domain:

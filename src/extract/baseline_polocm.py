@@ -548,12 +548,12 @@ class POLOCMBASELINE:
                 printmd(f"### Trace **{i}**\n")
                 print(tabulate(obj_PO_traces.items(), headers='keys', tablefmt='psql'))
             
-            printmd("## Object Traces PO Matrix")
-            for i, matrices in enumerate(obj_trace_PO_matrix_overall):
-                printmd(f"### Trace **{i}**\n")
-                for obj, matrix in matrices.items():
-                    printmd(f"#### Object ***{obj.name}***\n")
-                    print(tabulate(matrix, headers="keys", tablefmt='fancy_grid'))
+            # printmd("## Object Traces PO Matrix")
+            # for i, matrices in enumerate(obj_trace_PO_matrix_overall):
+            #     printmd(f"### Trace **{i}**\n")
+            #     for obj, matrix in matrices.items():
+            #         printmd(f"#### Object ***{obj.name}***\n")
+            #         print(tabulate(matrix, headers="keys", tablefmt='fancy_grid'))
             
         return obj_trace_PO_matrix_overall, dependencies
 
@@ -568,7 +568,8 @@ class POLOCMBASELINE:
         for trace_no, matrices, in enumerate(obj_trace_PO_matrix_overall):
             obj_consecutive_transitions: Dict[PlanningObject, List[Any]] = defaultdict(list)
             for obj,PO_matrix in matrices.items():
-                
+                if (len(PO_matrix) == 1):
+                    obj_consecutive_transitions[obj].append((PO_matrix.columns[0],None))
                 for i in range(len(PO_matrix)):
                     for j in range(len(PO_matrix)):
                         if (i==j):
@@ -605,10 +606,12 @@ class POLOCMBASELINE:
             graphs.append(nx.DiGraph())
         
         for obj_consecutive_transitions in obj_consecutive_transitions_overall:
+            
             for obj, transitions in obj_consecutive_transitions.items():
                 for iap1, iap2 in transitions:
                     graphs[sorts[obj.name]].add_node(iap1.toAP())
-                    graphs[sorts[obj.name]].add_node(iap2.toAP())
+                    if iap2:
+                        graphs[sorts[obj.name]].add_node(iap2.toAP())
            
         
         # adjacent matrix list for all sorts
@@ -617,7 +620,8 @@ class POLOCMBASELINE:
             for obj, transitions in obj_consecutive_transitions.items():
                 sort = sorts[obj.name] if obj.name!='zero' else 0
                 for iap1, iap2 in transitions:
-                    
+                    if not iap2:
+                        continue
                     if (graphs[sort].has_edge(iap1.toAP(), iap2.toAP())):
                         graphs[sort][iap1.toAP()][iap2.toAP()]['weight']+=1
                     else:
@@ -815,9 +819,7 @@ class POLOCMBASELINE:
             # Initialize a set for transition sets for the current sort
             transition_set_set = set()
             valid_pairs = set(consecutive_transitions_per_sort[index])
-
             transitions = transitions_per_sort[index]  # transitions is a list
-
             if holes:  # If there are any holes for the sort
                 for hole in holes:
                     # hole is already a frozenset
@@ -907,6 +909,8 @@ class POLOCMBASELINE:
                     for fsm_no, transitions in enumerate(transition_sets):
                         fsm = FSM(sort, fsm_no)
                         for iap1, iap2 in consecutive_transitions:
+                            if not iap2:
+                                continue
                             ap1 = iap1.toAP()
                             ap2 = iap2.toAP()
                             if ap1 in transitions and ap2 in transitions:
@@ -918,7 +922,8 @@ class POLOCMBASELINE:
                            
                 else:
                     for iap1, iap2 in consecutive_transitions:
-                         
+                        if not iap2:
+                            continue
                         subseq = (iap1.toAP(), iap2.toAP())
                         if (not TS[zero_fsm].get(zero_obj)):
                             TS[zero_fsm][zero_obj] = [subseq]
@@ -930,7 +935,7 @@ class POLOCMBASELINE:
 
         # initialize ap_state_pointers and OS      
         for sort, transition_sets in enumerate(transition_sets_per_sort):
-            
+
             for fsm_no, transitions in enumerate(transition_sets):
                 fsm = FSM(sort, fsm_no)
 
@@ -951,7 +956,7 @@ class POLOCMBASELINE:
 
         if debug:
             print('ap_state_pointers: \n', ap_state_pointers)
-       
+        
 
         # unify end - start state for consecutive transitions
         for fsm, ap_states in ap_state_pointers.items():
@@ -1295,10 +1300,12 @@ class POLOCMBASELINE:
         
         # delete zero-object if it's state machine was discarded
         zero_fsm = FSM(0,0)
+        shift =0
         if not OS[zero_fsm]:
             print('Confirm Zero Sort removed!')
             del OS[zero_fsm]
             del ap_state_pointers[zero_fsm]
+            shift = 1
           
 
         if debug:
@@ -1314,14 +1321,12 @@ class POLOCMBASELINE:
         actions = {}
         fluents = defaultdict(dict)
         
-        
-        
-
         for action, aps in all_aps.items():
             param_sorts = set(ap for ap in aps)
             deps = dependencies.get(action, set())
             param_sorts= list(param_sorts.union(deps))
             param_sorts.sort(key=lambda ap: ap.pos)
+
             actions[action] = LearnedLiftedAction(
                 action, [get_sort_name(s.sort) for s in param_sorts]
             )
@@ -1366,10 +1371,7 @@ class POLOCMBASELINE:
                 bound_param_inds = []
 
                 
-                if (get_sort_name(0) in start_fluent_temp.param_sorts):
-                    shift = 0
-                else: 
-                    shift = 1
+                
              
                 # for each bindings on the start state (if there are any)
                 # then add each binding.hypothesis.l_
